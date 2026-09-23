@@ -101,21 +101,35 @@
     return chunks;
   }
 
+  // Elements whose text is part of the batch currently in flight, marked
+  // with a non-intrusive outline (see content-style.css) so the reader can
+  // see what's loading without the original characters themselves changing
+  // in any way while they're still on screen.
+  function setLoading(nodes, isLoading) {
+    const els = new Set(nodes.map((n) => n.parentElement).filter(Boolean));
+    for (const el of els) el.classList.toggle('ai-reader-loading', isLoading);
+  }
+
   async function processNodeBatch(nodes, gen) {
-    const texts = nodes.map((n) => n.nodeValue);
-    let res;
+    setLoading(nodes, true);
     try {
-      res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts });
-    } catch (err) {
-      throw new Error(err?.message || '与插件后台通信失败');
+      const texts = nodes.map((n) => n.nodeValue);
+      let res;
+      try {
+        res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts });
+      } catch (err) {
+        throw new Error(err?.message || '与插件后台通信失败');
+      }
+      if (gen !== state.generation) return; // superseded by a restore/new run — discard
+      if (!res?.ok) throw new Error(res?.error || '处理请求失败');
+      res.results.forEach((rewritten, i) => {
+        const node = nodes[i];
+        if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
+        if (typeof rewritten === 'string' && rewritten.length) node.nodeValue = rewritten;
+      });
+    } finally {
+      setLoading(nodes, false);
     }
-    if (gen !== state.generation) return; // superseded by a restore/new run — discard
-    if (!res?.ok) throw new Error(res?.error || '处理请求失败');
-    res.results.forEach((rewritten, i) => {
-      const node = nodes[i];
-      if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
-      if (typeof rewritten === 'string' && rewritten.length) node.nodeValue = rewritten;
-    });
   }
 
   // --- Lazy, scroll-driven pipeline for "process whole page" -------------
