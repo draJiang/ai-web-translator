@@ -1,21 +1,21 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>AI 网页阅读助手 - 设置</title>
+    <title>AI Web Reader - Settings</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
-      <h1>AI 服务商设置</h1>
+      <h1>AI Provider Settings</h1>
       <form id="settingsForm">
         <label class="field">
-          <span>AI 服务商</span>
+          <span>AI Provider</span>
           <select id="provider">
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic Claude</option>
-            <option value="ollama">Ollama（Cloud / 本地）</option>
-            <option value="custom">自定义（OpenAI 兼容接口）</option>
+            <option value="ollama">Ollama (Cloud / Local)</option>
+            <option value="custom">Custom (OpenAI-compatible API)</option>
           </select>
         </label>
 
@@ -26,31 +26,31 @@
 
         <label class="field" id="baseUrlField">
           <span>Base URL</span>
-          <input type="text" id="baseUrl" placeholder="https://ollama.com 或 http://localhost:11434" />
+          <input type="text" id="baseUrl" placeholder="https://ollama.com or http://localhost:11434" />
         </label>
 
         <label class="field">
-          <span>模型名称</span>
-          <input type="text" id="model" placeholder="例如 gpt-4o-mini / claude-haiku-4-5 / gemma4:31b" />
+          <span>Model Name</span>
+          <input type="text" id="model" placeholder="e.g. gpt-4o-mini / claude-haiku-4-5 / gemma4:31b" />
         </label>
 
         <div class="actions">
-          <button type="submit" class="primary">保存</button>
-          <button type="button" id="testBtn">测试连接</button>
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="testBtn">Test Connection</button>
         </div>
         <p id="result" class="result"></p>
       </form>
 
       <section class="hint">
-        <h2>说明</h2>
+        <h2>Notes</h2>
         <ul>
-          <li>当前版本固定使用一个内置 Prompt：把网页英文正文改写为 <strong>CEFR B1</strong> 难度，保留原意、缩短长句、替换生僻词，保留的难词附上简短英文释义，方便边读边学。</li>
-          <li><strong>OpenAI</strong>：调用 <code>api.openai.com/v1/chat/completions</code>，需要 OpenAI API Key。</li>
-          <li><strong>Anthropic Claude</strong>：调用 <code>api.anthropic.com/v1/messages</code>，需要 Anthropic API Key。</li>
-          <li><strong>Ollama</strong>：默认连接 Ollama Cloud（<code>https://ollama.com</code>），填入你的 Ollama API Key；若用本地 Ollama，把 Base URL 改成 <code>http://localhost:11434</code>，一般无需 API Key。</li>
-          <li><strong>自定义</strong>：任意兼容 OpenAI <code>/chat/completions</code> 协议的服务（如自建网关、其它模型供应商）。</li>
-          <li>更换 Base URL 到官方以外的地址时，浏览器会弹出一次性授权确认，这是 Chrome 扩展的最小权限机制。</li>
-          <li>API Key 只保存在浏览器本地存储（<code>chrome.storage.local</code>），不会上传到你选择的 AI 服务商之外的任何服务器。</li>
+          <li>This version uses one built-in prompt: it rewrites English page text into <strong>CEFR B1</strong>-level English, keeping the original meaning, shortening long sentences, and replacing rare words, with short English glosses added for any hard words that remain — good for reading practice. Custom prompts (other levels, other languages, other rewrite styles) are coming soon.</li>
+          <li><strong>OpenAI</strong>: calls <code>api.openai.com/v1/chat/completions</code>, requires an OpenAI API key.</li>
+          <li><strong>Anthropic Claude</strong>: calls <code>api.anthropic.com/v1/messages</code>, requires an Anthropic API key.</li>
+          <li><strong>Ollama</strong>: connects to Ollama Cloud by default (<code>https://ollama.com</code>) — enter your Ollama API key; for local Ollama, change Base URL to <code>http://localhost:11434</code>, which usually needs no API key.</li>
+          <li><strong>Custom</strong>: any service compatible with the OpenAI <code>/chat/completions</code> protocol (a self-hosted gateway, another model provider, etc).</li>
+          <li>Changing Base URL to a non-default address triggers a one-time permission prompt from the browser — this is Chrome extensions' least-privilege mechanism.</li>
+          <li>Your API key is only stored in the browser's local storage (<code>chrome.storage.local</code>) and is never sent to any server other than the AI provider you choose.</li>
         </ul>
       </section>
     </main>

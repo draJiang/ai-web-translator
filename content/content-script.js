@@ -37,7 +37,7 @@
     busy: false, // a batch request is currently in flight
     generation: 0, // bumped on every start/restore so stale async results are dropped
     originalMap: new Map(), // text node -> original text
-    rewriteCache: new Map(), // original text -> rewritten text, survives restore() so switching "转写" back on doesn't re-call the API for text seen before
+    rewriteCache: new Map(), // original text -> rewritten text, survives restore() so turning rewrite mode back on doesn't re-call the API for text seen before
     trackedNodes: new WeakSet(), // nodes already scheduled at least once (processed or pending)
     observer: null,
     elToSegments: null, // Element -> segment[] awaiting that element's visibility
@@ -206,10 +206,10 @@
         try {
           res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts: toFetchTexts });
         } catch (err) {
-          throw new Error(err?.message || '与插件后台通信失败');
+          throw new Error(err?.message || 'Failed to communicate with the extension background');
         }
         if (gen !== state.generation) return; // superseded by a restore/new run — discard
-        if (!res?.ok) throw new Error(res?.error || '处理请求失败');
+        if (!res?.ok) throw new Error(res?.error || 'Processing request failed');
         res.results.forEach((rewritten, i) => {
           if (typeof rewritten === 'string' && rewritten.length) {
             state.rewriteCache.set(toFetchTexts[i], rewritten);
@@ -328,7 +328,7 @@
   async function drain(gen) {
     state.draining = true;
     state.busy = true;
-    showStatus('正在转为 B1 英文…');
+    showStatus('Rewriting…');
     try {
       while (state.queue.length && gen === state.generation) {
         const batch = [];
@@ -348,10 +348,10 @@
         try {
           await processNodeBatch(batch, gen);
         } catch (err) {
-          showStatus('处理失败：' + (err?.message || err), 4000, true);
+          showStatus('Processing failed: ' + (err?.message || err), 4000, true);
         }
       }
-      if (gen === state.generation) showStatus('已更新为 B1 英文', 1200);
+      if (gen === state.generation) showStatus('Rewritten', 1200);
     } finally {
       state.draining = false;
       state.busy = false;
@@ -365,7 +365,7 @@
     state.active = true;
     state.busy = false;
     notifyState();
-    showStatus('B1 模式已开启，正在处理可见内容…');
+    showStatus('Rewrite mode on — processing visible content…');
     scanAndObserve(gen);
     startNavWatcher(gen);
   }
@@ -378,7 +378,7 @@
     const range = sel.getRangeAt(0);
     const gen = state.generation;
     state.busy = true;
-    showStatus('正在转为 B1 英文…');
+    showStatus('Rewriting…');
     try {
       const nodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
       if (!nodes.length) return;
@@ -390,9 +390,9 @@
         state.active = true;
         notifyState();
       }
-      showStatus('已转为 B1 英文', 1500);
+      showStatus('Rewritten', 1500);
     } catch (err) {
-      showStatus('处理失败：' + (err?.message || err), 4000, true);
+      showStatus('Processing failed: ' + (err?.message || err), 4000, true);
       throw err;
     } finally {
       state.busy = false;
@@ -466,7 +466,7 @@
 
   async function explainRange(range, text) {
     if (text.length > EXPLAIN_MAX_CHARS) {
-      showStatus('选中内容过长，请选择一个单词或一句话', 2500, true);
+      showStatus('Selection is too long — choose a single word or sentence', 2500, true);
       return;
     }
     // "ethnicity" -> "ethnicity(……)" while the request is in flight, so the
@@ -477,18 +477,18 @@
       gloss = insertGlossNode(range, '……');
       gloss.classList.add('ai-reader-gloss--loading');
     } catch (err) {
-      showStatus('无法在此处插入解释：' + (err?.message || err), 3000, true);
+      showStatus("Couldn't insert an explanation here: " + (err?.message || err), 3000, true);
       return;
     }
-    showStatus('正在生成解释…');
+    showStatus('Generating explanation…');
     try {
       const context = getExplainContext(range);
       const res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_TEXT', text, context });
-      if (!res?.ok) throw new Error(res?.error || '解释请求失败');
+      if (!res?.ok) throw new Error(res?.error || 'Explanation request failed');
       const explanation = (res.explanation || '').trim();
       if (!explanation) {
         removeGloss(gloss);
-        showStatus('未能为所选内容生成解释', 2000, true);
+        showStatus("Couldn't generate an explanation for the selection", 2000, true);
         return;
       }
       gloss.textContent = ` (${explanation})`;
@@ -497,10 +497,10 @@
         state.active = true;
         notifyState();
       }
-      showStatus('已添加解释', 1200);
+      showStatus('Explanation added', 1200);
     } catch (err) {
       removeGloss(gloss);
-      showStatus('解释失败：' + (err?.message || err), 3000, true);
+      showStatus('Explanation failed: ' + (err?.message || err), 3000, true);
     }
   }
 
@@ -551,7 +551,7 @@
     state.active = false;
     state.busy = false;
     notifyState();
-    showStatus('已还原原文', 1200);
+    showStatus('Original text restored', 1200);
   }
 
   function notifyState() {

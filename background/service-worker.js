@@ -40,12 +40,12 @@ async function setTabRemembered(tabId, active) {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'process-selection',
-    title: '转为 B1 英文（选中内容）',
+    title: 'Rewrite Selection',
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
     id: 'process-page',
-    title: '转为 B1 英文（整个页面）',
+    title: 'Rewrite Page',
     contexts: ['page'],
   });
 });
