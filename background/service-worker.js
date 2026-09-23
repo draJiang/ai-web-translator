@@ -94,7 +94,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
         if (!map[tabId]) return;
         const has = await chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] });
         if (!has) return;
-        await injectAndStart(tabId, 'page');
+        const res = await injectAndStart(tabId, 'page');
+        // The content script's own STATE_CHANGED message normally sets this,
+        // but a real page can fire extra tabs.onUpdated 'loading' events after
+        // this point (redirects, client-side route swaps right after load,
+        // etc.), each of which resets the icon to default — racing that
+        // message and leaving the icon stuck on default even though the page
+        // did get processed. Set it here too, as the last, authoritative step
+        // once we actually know the resulting state, so it always ends up
+        // correct regardless of that race.
+        setTabIcon(tabId, !!res?.active);
       })
       .catch(() => {});
   }
@@ -112,12 +121,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
   if (info.menuItemId === 'process-selection' || info.menuItemId === 'process-page') {
     const mode = info.menuItemId === 'process-selection' ? 'selection' : 'page';
-    await injectAndStart(tab.id, mode);
+    const res = await injectAndStart(tab.id, mode);
+    setTabIcon(tab.id, !!res?.active);
   }
 });
 
 async function injectAndStart(tabId, mode) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ['content/content-script.js'] });
   await chrome.scripting.insertCSS({ target: { tabId }, files: ['content/content-style.css'] });
-  await chrome.tabs.sendMessage(tabId, { type: 'START_PROCESS', mode });
+  return chrome.tabs.sendMessage(tabId, { type: 'START_PROCESS', mode });
 }
