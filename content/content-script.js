@@ -10,15 +10,30 @@
     'CODE', 'PRE', 'IFRAME', 'TITLE', 'SVG',
   ]);
 
+  // How far below the viewport (in px) a block is "about to" scroll into
+  // view and should be pre-processed, instead of waiting until it's visible.
+  const PRELOAD_MARGIN_PX = 600;
+  const MAX_BATCH_CHARS = 1800;
+  const MAX_BATCH_ITEMS = 40;
+
   const state = {
-    processed: false,
-    busy: false,
+    active: false, // true once the user has turned B1 mode on for this page
+    busy: false, // a batch request is currently in flight
+    generation: 0, // bumped on every start/restore so stale async results are dropped
     originalMap: new Map(), // text node -> original text
+    observer: null,
+    elToSegments: null, // Element -> segment[] awaiting that element's visibility
+    queue: [], // segments that are visible/near-visible and not yet processed
+    draining: false,
   };
 
   function isVisible(el) {
     const style = window.getComputedStyle(el);
     return !!style && style.display !== 'none' && style.visibility !== 'hidden';
+  }
+
+  function getMainRoot() {
+    return document.querySelector('main') || document.body;
   }
 
   function collectTextNodes(root) {
@@ -41,7 +56,26 @@
     return nodes;
   }
 
-  function chunk(nodes, maxChars = 1800, maxItems = 40) {
+  // Group consecutive text nodes that share the same parent element into one
+  // "segment" — segments are what we watch for scroll visibility and what we
+  // send to the AI as one unit, so a sentence split across inline tags stays
+  // reasonably coherent instead of firing one request per tiny fragment.
+  function buildSegments(nodes) {
+    const segments = [];
+    let current = null;
+    for (const node of nodes) {
+      const el = node.parentElement;
+      if (current && current.el === el) {
+        current.nodes.push(node);
+      } else {
+        current = { el, nodes: [node], queued: false, done: false };
+        segments.push(current);
+      }
+    }
+    return segments;
+  }
+
+  function chunkNodes(nodes, maxChars, maxItems) {
     const chunks = [];
     let cur = [];
     let curChars = 0;
@@ -59,51 +93,131 @@
     return chunks;
   }
 
-  async function processNodes(nodes) {
-    const batches = chunk(nodes);
-    for (const batch of batches) {
-      const texts = batch.map((n) => n.nodeValue);
-      const res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts });
-      if (!res?.ok) throw new Error(res?.error || '处理请求失败');
-      res.results.forEach((rewritten, i) => {
-        const node = batch[i];
-        // Node identity is stable across this call since we never touch the
-        // DOM structure — only nodeValue — so batch[i] still points at the
-        // same text node the AI's i-th result corresponds to.
-        if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
-        if (typeof rewritten === 'string' && rewritten.length) node.nodeValue = rewritten;
-      });
+  async function processNodeBatch(nodes, gen) {
+    const texts = nodes.map((n) => n.nodeValue);
+    let res;
+    try {
+      res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts });
+    } catch (err) {
+      throw new Error(err?.message || '与插件后台通信失败');
     }
+    if (gen !== state.generation) return; // superseded by a restore/new run — discard
+    if (!res?.ok) throw new Error(res?.error || '处理请求失败');
+    res.results.forEach((rewritten, i) => {
+      const node = nodes[i];
+      if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
+      if (typeof rewritten === 'string' && rewritten.length) node.nodeValue = rewritten;
+    });
   }
 
-  async function processPage() {
-    if (state.busy) return;
+  // --- Lazy, scroll-driven pipeline for "process whole page" -------------
+
+  function setupObserver(segments, gen) {
+    const elToSegments = new Map();
+    for (const seg of segments) {
+      if (!elToSegments.has(seg.el)) elToSegments.set(seg.el, []);
+      elToSegments.get(seg.el).push(seg);
+    }
+    state.elToSegments = elToSegments;
+
+    const observer = new IntersectionObserver(
+      (entries) => onIntersect(entries, gen),
+      { root: null, rootMargin: `0px 0px ${PRELOAD_MARGIN_PX}px 0px`, threshold: 0 }
+    );
+    for (const el of elToSegments.keys()) observer.observe(el);
+    state.observer = observer;
+  }
+
+  function onIntersect(entries, gen) {
+    if (gen !== state.generation) return;
+    let added = false;
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const segs = state.elToSegments.get(entry.target) || [];
+      for (const seg of segs) {
+        if (!seg.queued && !seg.done) {
+          seg.queued = true;
+          state.queue.push(seg);
+          added = true;
+        }
+      }
+      state.observer.unobserve(entry.target);
+      state.elToSegments.delete(entry.target);
+    }
+    if (added) scheduleDrain(gen);
+  }
+
+  function scheduleDrain(gen) {
+    if (state.draining) return;
+    drain(gen);
+  }
+
+  async function drain(gen) {
+    state.draining = true;
     state.busy = true;
     showStatus('正在转为 B1 英文…');
     try {
-      const nodes = collectTextNodes(document.body);
-      await processNodes(nodes);
-      state.processed = true;
-      showStatus('已转为 B1 英文', 1500);
-    } catch (err) {
-      showStatus('处理失败：' + (err?.message || err), 4000, true);
-      throw err;
+      while (state.queue.length && gen === state.generation) {
+        const batch = [];
+        let chars = 0;
+        while (state.queue.length) {
+          const seg = state.queue[0];
+          const segChars = seg.nodes.reduce((s, n) => s + n.nodeValue.length, 0);
+          if (batch.length && (batch.length + seg.nodes.length > MAX_BATCH_ITEMS || chars + segChars > MAX_BATCH_CHARS)) {
+            break;
+          }
+          state.queue.shift();
+          seg.done = true;
+          batch.push(...seg.nodes);
+          chars += segChars;
+        }
+        if (!batch.length) break;
+        try {
+          await processNodeBatch(batch, gen);
+        } catch (err) {
+          showStatus('处理失败：' + (err?.message || err), 4000, true);
+        }
+      }
+      if (gen === state.generation) showStatus('已更新为 B1 英文', 1200);
     } finally {
+      state.draining = false;
       state.busy = false;
     }
   }
+
+  function startPage() {
+    if (state.active) return;
+    state.generation += 1;
+    const gen = state.generation;
+    state.active = true;
+    state.busy = false;
+    notifyState();
+    showStatus('B1 模式已开启，正在处理可见内容…');
+    const nodes = collectTextNodes(getMainRoot());
+    const segments = buildSegments(nodes);
+    setupObserver(segments, gen);
+  }
+
+  // --- Immediate path for an explicit user selection ----------------------
 
   async function processSelection() {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
-    if (state.busy) return;
+    const gen = state.generation;
     state.busy = true;
     showStatus('正在转为 B1 英文…');
     try {
       const nodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
-      await processNodes(nodes);
-      state.processed = state.processed || nodes.length > 0;
+      if (!nodes.length) return;
+      const chunks = chunkNodes(nodes, MAX_BATCH_CHARS, MAX_BATCH_ITEMS);
+      for (const batch of chunks) {
+        await processNodeBatch(batch, gen);
+      }
+      if (!state.active) {
+        state.active = true;
+        notifyState();
+      }
       showStatus('已转为 B1 英文', 1500);
     } catch (err) {
       showStatus('处理失败：' + (err?.message || err), 4000, true);
@@ -113,13 +227,30 @@
     }
   }
 
+  function stopObserving() {
+    if (state.observer) {
+      state.observer.disconnect();
+      state.observer = null;
+    }
+    state.elToSegments = null;
+    state.queue = [];
+  }
+
   function restore() {
+    state.generation += 1; // invalidate any in-flight batch so late results are dropped
+    stopObserving();
     for (const [node, original] of state.originalMap.entries()) {
       node.nodeValue = original;
     }
     state.originalMap.clear();
-    state.processed = false;
+    state.active = false;
+    state.busy = false;
+    notifyState();
     showStatus('已还原原文', 1200);
+  }
+
+  function notifyState() {
+    chrome.runtime.sendMessage({ type: 'STATE_CHANGED', active: state.active }).catch(() => {});
   }
 
   let statusEl;
@@ -141,20 +272,24 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'START_PROCESS') {
-      const job = message.mode === 'selection' ? processSelection() : processPage();
-      Promise.resolve(job)
-        .then(() => sendResponse({ ok: true, processed: state.processed }))
-        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
-      return true;
+      if (message.mode === 'selection') {
+        processSelection()
+          .then(() => sendResponse({ ok: true, active: state.active }))
+          .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+        return true;
+      }
+      startPage();
+      sendResponse({ ok: true, active: state.active });
+      return false;
     }
     if (message?.type === 'RESTORE') {
       restore();
       sendResponse({ ok: true });
-      return true;
+      return false;
     }
     if (message?.type === 'PING') {
-      sendResponse({ ok: true, processed: state.processed, busy: state.busy });
-      return true;
+      sendResponse({ ok: true, active: state.active, busy: state.busy });
+      return false;
     }
   });
 })();

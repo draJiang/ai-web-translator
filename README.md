@@ -7,8 +7,11 @@
 ## 功能
 
 - 一键处理整个页面，或右键菜单处理选中文本
+- 只处理页面 `<main>` 标签内的正文（没有 `<main>` 的页面回退为整个 `<body>`），跳过导航栏、侧边栏、页脚等非正文区域
+- 按滚动位置懒加载处理：打开时只处理当前可见内容，其余内容在**即将**滚入视口时才处理（默认提前 600px），不会一次性处理整页、不会浪费 API 调用
 - 直接替换原始文本节点内容，不改变页面排版/结构
-- 一键还原为原文
+- 一键还原为原文；还原后会停止后续的懒加载处理
+- 两种状态在工具栏图标上可见：原文状态为默认图标，译文（B1）状态图标右下角会多一个绿色对勾徽标，无需打开弹窗也能看出当前标签页处于哪种状态
 - AI 服务商可配置，支持：
   - **OpenAI**（`api.openai.com/v1/chat/completions`）
   - **Anthropic Claude**（`api.anthropic.com/v1/messages`）
@@ -48,14 +51,18 @@ curl https://ollama.com/api/chat \
 
 ## 实现原理
 
-1. `content/content-script.js` 用 `TreeWalker` 收集页面里可见的文本节点（跳过 `script`/`style`/`input`/`code` 等），按字符数分批。
-2. 每一批文本节点的原始内容打包成编号列表，通过消息发给 `background/service-worker.js`。
-3. Service worker 根据设置调用对应 AI 服务商，系统提示词固定为 `lib/prompts.js` 中的 B1 改写规则，要求模型返回与输入条数一致的 JSON 字符串数组。
-4. Content script 按顺序把返回结果写回**同一个文本节点**的 `nodeValue`，同时记住原文，便于「还原」。因为只改文本内容、不改 DOM 结构，页面排版不受影响。
+1. `content/content-script.js` 用 `TreeWalker` 收集 `<main>`（没有则整个 `<body>`）里可见的文本节点（跳过 `script`/`style`/`input`/`code` 等），按共同的父元素分组成一个个「片段」。
+2. 每个片段的父元素被注册进一个 `IntersectionObserver`，`rootMargin` 向下扩展 600px——也就是说片段一旦进入视口，或者还没进入但已经在"即将滚入视口"的缓冲区内，就会被标记为待处理。点击「转为 B1 英文」时不会立刻处理全文，只有当前视口 + 缓冲区内的片段会先被处理。
+3. 待处理的片段按字符数/条数限制合并成批次，通过消息发给 `background/service-worker.js`。
+4. Service worker 根据设置调用对应 AI 服务商，系统提示词固定为 `lib/prompts.js` 中的 B1 改写规则，要求模型返回与输入条数一致的 JSON 字符串数组。
+5. Content script 按顺序把返回结果写回**同一个文本节点**的 `nodeValue`，同时记住原文，便于「还原」。因为只改文本内容、不改 DOM 结构，页面排版不受影响。
+6. 用户继续往下滚动时，新进入缓冲区的片段会持续被观察到并加入处理队列，直到整页处理完，或用户点击「还原原文」（还原会断开 observer、清空队列，并让任何仍在返回路上的旧请求结果作废，避免还原后又被写回）。
+7. 每次状态切换（开启/还原）content script 都会给 background 发一条 `STATE_CHANGED` 消息，background 用 `chrome.action.setIcon` 按 `tabId` 切换该标签页的工具栏图标；标签页开始加载新文档时图标会自动重置为默认状态。
 
 ### 已知局限
 
 - 处理是按 DOM 文本节点分批进行的，同一句话如果被内联标签（如 `<b>`/`<a>`）拆成多个文本节点，AI 只能分别处理每个片段，可能损失句子级别的整体重写效果，比逐段处理连续文章的效果要弱一些。
+- 懒加载依赖 `IntersectionObserver`，对于高度虚拟滚动（内容随滚动动态增删 DOM）的页面，效果可能不如普通静态长文页面稳定。
 - 目前只有 B1 英文改写这一个固定场景；多语言翻译、可自定义 Prompt 等留作后续迭代。
 
 ## 目录结构
@@ -70,7 +77,7 @@ lib/prompts.js                 # 固定的 B1 改写系统提示词
 lib/storage.js                 # 设置的读写（chrome.storage.local）
 popup/                         # 工具栏弹出窗口
 options/                       # 设置页
-icons/                         # 插件图标
+icons/                         # 插件图标（默认 + 译文状态的 -active 变体）
 ```
 
 ## License

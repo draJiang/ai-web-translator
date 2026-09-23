@@ -6,7 +6,7 @@ const warningEl = document.getElementById('warning');
 document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
 let currentTabId = null;
-let isProcessed = false;
+let isActive = false;
 
 init();
 
@@ -28,7 +28,7 @@ async function init() {
   try {
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
     if (res?.ok) {
-      isProcessed = !!res.processed;
+      isActive = !!res.active;
       updateButton();
     }
   } catch {
@@ -41,18 +41,18 @@ processBtn.addEventListener('click', async () => {
   if (!currentTabId) return;
   processBtn.disabled = true;
   try {
-    if (isProcessed) {
+    if (isActive) {
       await chrome.tabs.sendMessage(currentTabId, { type: 'RESTORE' });
-      isProcessed = false;
+      isActive = false;
       setStatus('已还原原文');
     } else {
-      setStatus('正在转为 B1 英文…');
+      setStatus('正在开启 B1 模式…');
       await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ['content/content-script.js'] });
       await chrome.scripting.insertCSS({ target: { tabId: currentTabId }, files: ['content/content-style.css'] });
       const res = await chrome.tabs.sendMessage(currentTabId, { type: 'START_PROCESS', mode: 'page' });
       if (!res?.ok) throw new Error(res?.error || '处理失败');
-      isProcessed = true;
-      setStatus('已转为 B1 英文');
+      isActive = true;
+      setStatus('已开启，页面下滑时会持续处理新内容');
     }
   } catch (err) {
     setStatus('出错：' + (err?.message || err));
@@ -63,7 +63,7 @@ processBtn.addEventListener('click', async () => {
 });
 
 function updateButton() {
-  processBtn.textContent = isProcessed ? '还原原文' : '转为 B1 英文';
+  processBtn.textContent = isActive ? '还原原文' : '转为 B1 英文';
 }
 
 function setStatus(text) {
