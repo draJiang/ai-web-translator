@@ -13,18 +13,26 @@
   // How far below the viewport (in px) a block is "about to" scroll into
   // view and should be pre-processed, instead of waiting until it's visible.
   const PRELOAD_MARGIN_PX = 600;
-  const MAX_BATCH_CHARS = 1800;
-  const MAX_BATCH_ITEMS = 40;
+  // Kept small so a batch comes back quickly — segments near the preload
+  // edge need to finish before the user scrolls the rest of the way to them.
+  const MAX_BATCH_CHARS = 900;
+  const MAX_BATCH_ITEMS = 20;
+  // How long to wait after the DOM goes quiet before treating it as a real
+  // content swap (SPA route change, "load more", etc.) worth rescanning.
+  const NAV_DEBOUNCE_MS = 500;
 
   const state = {
     active: false, // true once the user has turned B1 mode on for this page
     busy: false, // a batch request is currently in flight
     generation: 0, // bumped on every start/restore so stale async results are dropped
     originalMap: new Map(), // text node -> original text
+    trackedNodes: new WeakSet(), // nodes already scheduled at least once (processed or pending)
     observer: null,
     elToSegments: null, // Element -> segment[] awaiting that element's visibility
     queue: [], // segments that are visible/near-visible and not yet processed
     draining: false,
+    navObserver: null, // MutationObserver that detects SPA-style content swaps
+    navDebounceTimer: null,
   };
 
   function isVisible(el) {
@@ -112,20 +120,70 @@
 
   // --- Lazy, scroll-driven pipeline for "process whole page" -------------
 
-  function setupObserver(segments, gen) {
-    const elToSegments = new Map();
-    for (const seg of segments) {
-      if (!elToSegments.has(seg.el)) elToSegments.set(seg.el, []);
-      elToSegments.get(seg.el).push(seg);
+  function ensureObserver(gen) {
+    if (!state.observer) {
+      state.elToSegments = new Map();
+      state.observer = new IntersectionObserver(
+        (entries) => onIntersect(entries, gen),
+        { root: null, rootMargin: `0px 0px ${PRELOAD_MARGIN_PX}px 0px`, threshold: 0 }
+      );
     }
-    state.elToSegments = elToSegments;
+    return state.observer;
+  }
 
-    const observer = new IntersectionObserver(
-      (entries) => onIntersect(entries, gen),
-      { root: null, rootMargin: `0px 0px ${PRELOAD_MARGIN_PX}px 0px`, threshold: 0 }
+  // Adds newly-discovered segments to the running observer without
+  // disturbing segments that are already pending or mid-flight — used both
+  // for the initial scan and for incremental rescans after the page's
+  // content changes underneath us.
+  function addSegments(segments, gen) {
+    if (!segments.length) return;
+    const observer = ensureObserver(gen);
+    for (const seg of segments) {
+      if (!state.elToSegments.has(seg.el)) state.elToSegments.set(seg.el, []);
+      state.elToSegments.get(seg.el).push(seg);
+      observer.observe(seg.el);
+    }
+  }
+
+  // Scan the current main root for text nodes we haven't seen yet (skips
+  // anything already translated or already queued/observed) and start
+  // watching them. Safe to call repeatedly — e.g. once up front, then again
+  // whenever the page's content changes without a full reload.
+  function scanAndObserve(gen) {
+    const root = getMainRoot();
+    const nodes = collectTextNodes(root).filter(
+      (n) => !state.originalMap.has(n) && !state.trackedNodes.has(n)
     );
-    for (const el of elToSegments.keys()) observer.observe(el);
-    state.observer = observer;
+    if (!nodes.length) return;
+    for (const n of nodes) state.trackedNodes.add(n);
+    addSegments(buildSegments(nodes), gen);
+  }
+
+  // Some sites replace the page's content via client-side routing (History
+  // API) or dynamic loading without a full navigation — the content script
+  // stays alive and state.active stays true, but the DOM underneath it is
+  // now different. Watch for that and pick up newly-appeared text instead of
+  // requiring the user to manually restore and re-trigger B1 mode.
+  function startNavWatcher(gen) {
+    if (state.navObserver) return;
+    state.navObserver = new MutationObserver(() => {
+      clearTimeout(state.navDebounceTimer);
+      state.navDebounceTimer = setTimeout(() => {
+        if (!state.active || gen !== state.generation) return;
+        scanAndObserve(gen);
+      }, NAV_DEBOUNCE_MS);
+    });
+    // Our own writes only ever touch nodeValue (characterData), never
+    // childList, so this never re-triggers itself.
+    state.navObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopNavWatcher() {
+    if (state.navObserver) {
+      state.navObserver.disconnect();
+      state.navObserver = null;
+    }
+    clearTimeout(state.navDebounceTimer);
   }
 
   function onIntersect(entries, gen) {
@@ -193,9 +251,8 @@
     state.busy = false;
     notifyState();
     showStatus('B1 模式已开启，正在处理可见内容…');
-    const nodes = collectTextNodes(getMainRoot());
-    const segments = buildSegments(nodes);
-    setupObserver(segments, gen);
+    scanAndObserve(gen);
+    startNavWatcher(gen);
   }
 
   // --- Immediate path for an explicit user selection ----------------------
@@ -239,6 +296,8 @@
   function restore() {
     state.generation += 1; // invalidate any in-flight batch so late results are dropped
     stopObserving();
+    stopNavWatcher();
+    state.trackedNodes = new WeakSet();
     for (const [node, original] of state.originalMap.entries()) {
       node.nodeValue = original;
     }
