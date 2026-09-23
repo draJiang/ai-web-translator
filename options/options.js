@@ -1,11 +1,14 @@
 import { getSettings, saveSettings } from '../lib/storage.js';
 import { processBatch } from '../lib/providers.js';
+import { B1_SYSTEM_PROMPT } from '../lib/prompts.js';
 
 const form = document.getElementById('settingsForm');
 const providerEl = document.getElementById('provider');
 const apiKeyEl = document.getElementById('apiKey');
 const baseUrlEl = document.getElementById('baseUrl');
 const modelEl = document.getElementById('model');
+const rewritePromptEl = document.getElementById('rewritePrompt');
+const resetPromptBtn = document.getElementById('resetPromptBtn');
 const resultEl = document.getElementById('result');
 const testBtn = document.getElementById('testBtn');
 const baseUrlField = document.getElementById('baseUrlField');
@@ -25,8 +28,13 @@ async function init() {
   apiKeyEl.value = settings.apiKey || '';
   baseUrlEl.value = settings.baseUrl || '';
   modelEl.value = settings.model || '';
+  rewritePromptEl.value = settings.rewritePrompt || B1_SYSTEM_PROMPT;
   updateFieldVisibility();
 }
+
+resetPromptBtn.addEventListener('click', () => {
+  rewritePromptEl.value = B1_SYSTEM_PROMPT;
+});
 
 providerEl.addEventListener('change', () => {
   const def = PROVIDER_DEFAULTS[providerEl.value];
@@ -64,6 +72,7 @@ async function persist() {
     apiKey: apiKeyEl.value.trim(),
     baseUrl,
     model: modelEl.value.trim(),
+    rewritePrompt: rewritePromptEl.value.trim(),
   });
   showResult('Saved', false);
 }
@@ -96,6 +105,7 @@ testBtn.addEventListener('click', async () => {
       apiKey: apiKeyEl.value.trim(),
       baseUrl,
       model: modelEl.value.trim(),
+      rewritePrompt: rewritePromptEl.value.trim(),
     };
     const [rewritten] = await processBatch(settings, [
       'The implementation of the new policy was met with considerable reluctance from employees.',

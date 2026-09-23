@@ -34,6 +34,14 @@
           <input type="text" id="model" placeholder="e.g. gpt-4o-mini / claude-haiku-4-5 / gemma4:31b" />
         </label>
 
+        <div class="field">
+          <div class="field-header">
+            <span>Rewrite Prompt (system prompt)</span>
+            <button type="button" id="resetPromptBtn" class="link-btn">Reset to default</button>
+          </div>
+          <textarea id="rewritePrompt" rows="14" spellcheck="false"></textarea>
+        </div>
+
         <div class="actions">
           <button type="submit" class="primary">Save</button>
           <button type="button" id="testBtn">Test Connection</button>
@@ -44,7 +52,7 @@
       <section class="hint">
         <h2>Notes</h2>
         <ul>
-          <li>This version uses one built-in prompt: it rewrites English page text into <strong>CEFR B1</strong>-level English, keeping the original meaning, shortening long sentences, and replacing rare words, with short English glosses added for any hard words that remain — good for reading practice. Custom prompts (other levels, other languages, other rewrite styles) are coming soon.</li>
+          <li>The rewrite prompt above is fully editable — the built-in prompt rewrites English page text into <strong>CEFR B1</strong>-level English, keeping the original meaning, shortening long sentences, and replacing rare words, with short English glosses added for any hard words that remain, but you can replace it with your own (a different level, a different target language, a different rewrite style). It must still ask the model to return a JSON array of strings with exactly as many items as the input, in order — otherwise the extension won't be able to parse the response. Use "Reset to default" to restore the built-in prompt.</li>
           <li><strong>OpenAI</strong>: calls <code>api.openai.com/v1/chat/completions</code>, requires an OpenAI API key.</li>
           <li><strong>Anthropic Claude</strong>: calls <code>api.anthropic.com/v1/messages</code>, requires an Anthropic API key.</li>
           <li><strong>Ollama</strong>: connects to Ollama Cloud by default (<code>https://ollama.com</code>) — enter your Ollama API key; for local Ollama, change Base URL to <code>http://localhost:11434</code>, which usually needs no API key.</li>
