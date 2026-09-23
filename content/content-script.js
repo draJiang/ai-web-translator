@@ -20,6 +20,9 @@
   // How long to wait after the DOM goes quiet before treating it as a real
   // content swap (SPA route change, "load more", etc.) worth rescanning.
   const NAV_DEBOUNCE_MS = 500;
+  // A selection longer than this isn't "a word or a sentence" any more —
+  // decline rather than send an oversized ad-hoc explain request.
+  const EXPLAIN_MAX_CHARS = 300;
 
   const state = {
     active: false, // true once the user has turned B1 mode on for this page
@@ -33,6 +36,8 @@
     draining: false,
     navObserver: null, // MutationObserver that detects SPA-style content swaps
     navDebounceTimer: null,
+    glossElements: new Set(), // <span> nodes inserted by the Alt+select explain feature
+    glossTailNodes: new Set(), // text nodes split off by a gloss inserted mid-node; removed (not reverted) on restore
   };
 
   function isVisible(el) {
@@ -298,6 +303,102 @@
     }
   }
 
+  // --- Alt+select "explain this" ------------------------------------------
+  //
+  // Independent of B1 mode: holding Alt while selecting a word or sentence
+  // anywhere on the page asks the AI for a short gloss and appends it right
+  // after the selection, using the same gloss rules as the B1 rewrite. This
+  // necessarily inserts new content (the explanation has to go somewhere),
+  // unlike the rest of the extension which never touches layout — that's
+  // expected here since the reader explicitly asked for an annotation.
+
+  function getExplainContext(range) {
+    const container = range.commonAncestorContainer;
+    const el = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    const block = el
+      ? el.closest('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, dd, dt, figcaption') || el
+      : null;
+    const text = (block || document.body).textContent || '';
+    return text.slice(0, 400);
+  }
+
+  function insertGloss(range, explanation) {
+    const insertionPoint = range.cloneRange();
+    insertionPoint.collapse(false); // end of the original selection
+
+    // If the insertion point lands in the middle of a text node that's
+    // already tracked in originalMap (i.e. B1 already rewrote it), inserting
+    // here will make the browser split that node into a head (truncated,
+    // same node object) and a brand new tail text node right after our
+    // gloss. originalMap still holds the FULL original string for the head
+    // node — if we let restore() just set that back onto the head, the
+    // tail's (rewritten) text is untouched and ends up duplicated after it.
+    // So: track the tail node here and have restore() remove it outright
+    // instead of trying to revert it — the head's restore already covers
+    // that whole original sentence.
+    const container = insertionPoint.startContainer;
+    const offset = insertionPoint.startOffset;
+    const willSplitTrackedNode =
+      container.nodeType === Node.TEXT_NODE &&
+      offset > 0 &&
+      offset < container.nodeValue.length &&
+      state.originalMap.has(container);
+
+    const gloss = document.createElement('span');
+    gloss.className = 'ai-reader-gloss ai-reader-ignore';
+    gloss.textContent = ` (${explanation})`;
+    insertionPoint.insertNode(gloss);
+    state.glossElements.add(gloss);
+
+    if (willSplitTrackedNode) {
+      const tailNode = gloss.nextSibling;
+      if (tailNode && tailNode.nodeType === Node.TEXT_NODE) {
+        state.glossTailNodes.add(tailNode);
+      }
+    }
+  }
+
+  async function explainRange(range, text) {
+    if (text.length > EXPLAIN_MAX_CHARS) {
+      showStatus('选中内容过长，请选择一个单词或一句话', 2500, true);
+      return;
+    }
+    // Reuse the same "currently being sent to the AI" outline the batch
+    // pipeline uses, so the two features share one visual language.
+    const selectedNodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
+    setLoading(selectedNodes, true);
+    showStatus('正在生成解释…');
+    try {
+      const context = getExplainContext(range);
+      const res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_TEXT', text, context });
+      if (!res?.ok) throw new Error(res?.error || '解释请求失败');
+      const explanation = (res.explanation || '').trim();
+      if (!explanation) {
+        showStatus('未能为所选内容生成解释', 2000, true);
+        return;
+      }
+      insertGloss(range, explanation);
+      if (!state.active) {
+        state.active = true;
+        notifyState();
+      }
+      showStatus('已添加解释', 1200);
+    } catch (err) {
+      showStatus('解释失败：' + (err?.message || err), 3000, true);
+    } finally {
+      setLoading(selectedNodes, false);
+    }
+  }
+
+  document.addEventListener('mouseup', (event) => {
+    if (!event.altKey) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const text = sel.toString().trim();
+    if (!text) return;
+    explainRange(sel.getRangeAt(0).cloneRange(), text);
+  });
+
   function stopObserving() {
     if (state.observer) {
       state.observer.disconnect();
@@ -316,6 +417,14 @@
       node.nodeValue = original;
     }
     state.originalMap.clear();
+    for (const tailNode of state.glossTailNodes) {
+      tailNode.remove();
+    }
+    state.glossTailNodes.clear();
+    for (const gloss of state.glossElements) {
+      gloss.remove();
+    }
+    state.glossElements.clear();
     state.active = false;
     state.busy = false;
     notifyState();

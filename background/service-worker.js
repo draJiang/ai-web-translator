@@ -1,5 +1,5 @@
 import { getSettings } from '../lib/storage.js';
-import { processBatch } from '../lib/providers.js';
+import { processBatch, explainSelection } from '../lib/providers.js';
 
 const ICONS_DEFAULT = { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICONS_ACTIVE = { 16: 'icons/icon16-active.png', 48: 'icons/icon48-active.png', 128: 'icons/icon128-active.png' };
@@ -44,6 +44,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, results: result }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true; // keep the message channel open for the async response
+  }
+  if (message?.type === 'EXPLAIN_TEXT') {
+    getSettings()
+      .then((settings) => explainSelection(settings, message.text, message.context))
+      .then((explanation) => sendResponse({ ok: true, explanation }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
   }
   if (message?.type === 'STATE_CHANGED') {
     const tabId = sender.tab?.id;

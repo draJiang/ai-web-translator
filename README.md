@@ -14,6 +14,7 @@
 - 直接替换原始文本节点内容，不改变页面排版/结构
 - 一键还原为原文；还原后会停止后续的懒加载处理
 - 两种状态在工具栏图标上可见：原文状态为默认图标，译文（B1）状态图标右下角会多一个绿色对勾徽标，无需打开弹窗也能看出当前标签页处于哪种状态
+- **按住 Alt 选中单词/句子生成解释**：转写成 B1 之后仍有不认识的词，或者想单独看某句话的意思，按住 Alt 键鼠标选中它，AI 会按同样的释义规则在后面追加一段解释，比如 `ethnicity` 选中后变成 `ethnicity (your family's national origin)`。这个功能独立于整页 B1 模式，随时可用（只要插件已经在这个页面上被激活过一次），处理中的正在转写文字有一圈脉冲描边提示（见下）
 - AI 服务商可配置，支持：
   - **OpenAI**（`api.openai.com/v1/chat/completions`）
   - **Anthropic Claude**（`api.anthropic.com/v1/messages`）
@@ -33,6 +34,7 @@
 - 点击插件图标 → 「转为 B1 英文」，处理当前整个页面；再次点击变为「还原原文」
 - 选中网页上的一段文字 → 右键 → 「转为 B1 英文（选中内容）」
 - 右键页面空白处 → 「转为 B1 英文（整个页面）」
+- 按住 **Alt** 键，用鼠标选中一个单词或一句话（拖拽选中即可，松开鼠标时 Alt 仍按住），AI 会在选中内容后面追加一段解释，例如把 `ethnicity` 变成 `ethnicity (a group sharing ancestry or culture)`。这个功能不依赖整页 B1 模式是否开启，但需要插件已经在当前页面被激活过一次（点过一次「转为 B1 英文」、用过一次右键菜单，或者本页面是跨页面自动续开的），因为插件只在被激活时才会注入到页面里
 
 ## Ollama Cloud 配置示例
 
@@ -72,6 +74,8 @@ curl https://ollama.com/api/chat \
 7. 同时还有一个 `MutationObserver` 监听 `<body>` 的子树变化（只看 `childList`，不看文本内容变化，所以不会被自己写回译文的操作触发）。停顿 500ms 后如果页面仍处于 B1 模式，会重新扫描当前的 `<main>`，把还没处理过、还没在排队的新文本节点加入观察队列——用于覆盖前端路由/AJAX 换页这种「同一个文档、内容整体替换」的场景。
 8. 每次状态切换（开启/还原）content script 都会给 background 发一条 `STATE_CHANGED` 消息，background 用 `chrome.action.setIcon` 按 `tabId` 切换该标签页的工具栏图标，并把这个标签页「是否开启」写进 `chrome.storage.session`（键是 `tabId`）；标签页被关掉时会清掉对应记录。
 9. 标签页开始加载新文档时图标先重置为默认状态；等新文档 `complete` 后，background 查一下这个 `tabId` 之前是不是开着 B1 模式、并且已经有跨站权限（见上一节），两者都满足的话就重新执行第 1 步的注入流程，实现「跳转到新页面自动继续开启」。
+10. `document` 上有一个全局 `mouseup` 监听：如果那次抬起鼠标时 `event.altKey` 为真、且当前有非空选区，就取选中文本 + 它所在最近的块级祖先（`p`/`li`/`h1-h6`/`td` 等）的文本作为上下文，发一条 `EXPLAIN_TEXT` 消息给 background；background 用同样的 B1 释义规则（但改成单条解释、不改写原文）调用 AI，返回的解释包在一个 `<span class="ai-reader-gloss">` 里插到选区末尾。这一步必然会插入新内容（解释总要有地方放），跟其它功能"绝不插入新元素"的原则不同——用户主动选中要求解释，插入是预期行为。
+11. 如果解释的插入点正好在一个**已经被 B1 改写过**的文本节点中间，浏览器插入新元素时会隐式把这个文本节点从中间切成两段（前半段还是原来的节点对象，后半段是新建的文本节点）。这种情况下光还原前半段（`originalMap` 里存的还是没切之前的完整原文）会导致后半段的（改写后）文字被重复保留在页面上。为此 `insertGloss()` 会检测这种切分，把新产生的后半段记进 `state.glossTailNodes`；`restore()` 还原时先整体删除这些后半段节点，再把前半段设回完整原文，避免文字重复。这个坑是写端到端测试时实际跑出来的，不是纯靠读代码想到的，因此也用 Playwright + 本地 mock AI 服务器跑了一遍完整流程（开启 B1 → Alt 选词解释 → 还原）验证过修复有效。
 
 ### 已知局限
 
@@ -80,16 +84,18 @@ curl https://ollama.com/api/chat \
 - 跨页面记忆需要用户同意一次较宽泛的站点权限（见上文），拒绝的话行为等同旧版本：每个新页面都要手动点一次。
 - 跨页面记忆状态存在 `chrome.storage.session`，只在当前浏览器会话内有效；重启浏览器后需要重新开启一次（之后又会持续跨页面生效，直到下次重启或手动还原）。
 - 目前只有 B1 英文改写这一个固定场景；多语言翻译、可自定义 Prompt 等留作后续迭代。
+- Alt+选词解释需要页面上已经注入过 content script（点过一次「转为 B1 英文」/右键菜单/跨页面自动续开），在插件从未被激活过的页面上不会响应。
+- Alt+选词解释一次最多接受约 300 字符的选区，超出会提示「选中内容过长」而不发请求，避免把整段文字当"单词或句子"处理。
 
 ## 目录结构
 
 ```
 manifest.json
-background/service-worker.js   # 消息路由 + 调用 AI 服务商 + 右键菜单
-content/content-script.js      # 收集文本节点、写回结果、还原
-content/content-style.css      # 页面右下角的状态提示样式
-lib/providers.js               # 各 AI 服务商的请求实现
-lib/prompts.js                 # 固定的 B1 改写系统提示词
+background/service-worker.js   # 消息路由 + 调用 AI 服务商 + 右键菜单 + 跨页面记忆
+content/content-script.js      # 收集文本节点、懒加载调度、Alt+选词解释、写回结果、还原
+content/content-style.css      # 状态提示 / 加载描边 / 解释文字的样式
+lib/providers.js               # 各 AI 服务商的请求实现（B1 改写 + 选词解释共用）
+lib/prompts.js                 # B1 改写、选词解释两套系统提示词
 lib/storage.js                 # 设置的读写（chrome.storage.local）
 popup/                         # 工具栏弹出窗口
 options/                       # 设置页

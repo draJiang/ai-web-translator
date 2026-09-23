@@ -51,3 +51,12 @@
     outline-color: rgba(47, 77, 224, 0.5);
   }
 }
+
+/* Explanation appended by Alt+select. Inherits the surrounding text's own
+   color (never overridden) so it always has the same contrast as the page
+   around it, whatever that page's theme is — only italic + slightly reduced
+   opacity to mark it as an addition. */
+.ai-reader-gloss {
+  font-style: italic;
+  opacity: 0.8;
+}

@@ -71,6 +71,13 @@ button {
   min-height: 14px;
 }
 
+.tip {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: #888;
+  line-height: 1.5;
+}
+
 footer {
   padding: 8px 16px 12px;
   border-top: 1px solid #eee;
