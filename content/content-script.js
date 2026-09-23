@@ -24,6 +24,14 @@
   // decline rather than send an oversized ad-hoc explain request.
   const EXPLAIN_MAX_CHARS = 300;
 
+  // The B1 rewrite prompt (lib/prompts.js) wraps an in-line gloss's
+  // explanation in this tag so it can be styled like the Alt+select gloss
+  // (italic + dimmed) instead of reading as plain sentence text. Kept
+  // deliberately unlike any real word so it can't collide with a webpage's
+  // own text.
+  const GLOSS_TAG_RE = /<ai-gloss>([\s\S]*?)<\/ai-gloss>/g;
+  const STRAY_GLOSS_TAG_RE = /<\/?ai-gloss>/g;
+
   const state = {
     active: false, // true once the user has turned B1 mode on for this page
     busy: false, // a batch request is currently in flight
@@ -38,6 +46,7 @@
     navDebounceTimer: null,
     glossElements: new Set(), // <span> nodes inserted by the Alt+select explain feature
     glossTailNodes: new Set(), // text nodes split off by a gloss inserted mid-node; removed (not reverted) on restore
+    rewriteWrappers: new Map(), // original text node -> <span> wrapper, for rewrites that contained an in-line gloss
   };
 
   function isVisible(el) {
@@ -106,17 +115,80 @@
     return chunks;
   }
 
-  // Elements whose text is part of the batch currently in flight, marked
-  // with a non-intrusive outline (see content-style.css) so the reader can
-  // see what's loading without the original characters themselves changing
-  // in any way while they're still on screen.
-  function setLoading(nodes, isLoading) {
-    const els = new Set(nodes.map((n) => n.parentElement).filter(Boolean));
-    for (const el of els) el.classList.toggle('ai-reader-loading', isLoading);
+  // Builds the plain-text-plus-gloss-spans replacement for a rewritten
+  // string that contains one or more <ai-gloss> tags. Returns null if, once
+  // any stray/malformed tags are stripped out, there's nothing left to show
+  // (caller then falls back to a plain sanitized string instead).
+  function buildGlossFragment(text) {
+    const fragment = document.createDocumentFragment();
+    const plainNodes = [];
+    let lastIndex = 0;
+    let match;
+    GLOSS_TAG_RE.lastIndex = 0;
+    const appendPlain = (raw) => {
+      const cleaned = raw.replace(STRAY_GLOSS_TAG_RE, '');
+      if (!cleaned) return;
+      const t = document.createTextNode(cleaned);
+      fragment.appendChild(t);
+      plainNodes.push(t);
+    };
+    while ((match = GLOSS_TAG_RE.exec(text))) {
+      appendPlain(text.slice(lastIndex, match.index));
+      let explanation = match[1].replace(STRAY_GLOSS_TAG_RE, '').trim();
+      // Defensive: the prompt asks the model not to add its own parentheses,
+      // but strip a redundant pair if it does anyway, so we never render "((…))".
+      if (explanation.startsWith('(') && explanation.endsWith(')')) {
+        explanation = explanation.slice(1, -1).trim();
+      }
+      if (explanation) {
+        const gloss = document.createElement('span');
+        gloss.className = 'ai-reader-gloss ai-reader-ignore';
+        gloss.textContent = ` (${explanation})`;
+        fragment.appendChild(gloss);
+      }
+      lastIndex = GLOSS_TAG_RE.lastIndex;
+    }
+    appendPlain(text.slice(lastIndex));
+    return fragment.childNodes.length ? { fragment, plainNodes } : null;
+  }
+
+  // Applies one rewritten string to the text node it came from. Most
+  // fragments have no gloss and take the original fast path (set nodeValue
+  // in place, no DOM structure change). A fragment with an <ai-gloss> tag
+  // can't be represented in a single text node — CSS can't style part of a
+  // text node's characters — so it's replaced with a small wrapper element
+  // containing plain text nodes plus a styled span for the gloss.
+  function applyRewrite(node, rewritten) {
+    // Checks for either tag, not just the opening one — a lone stray
+    // "</ai-gloss>" (no matching open tag) must still go through sanitizing
+    // below instead of leaking into nodeValue verbatim.
+    if (!rewritten.includes('ai-gloss')) {
+      node.nodeValue = rewritten;
+      return;
+    }
+    const built = buildGlossFragment(rewritten);
+    if (!built) {
+      node.nodeValue = rewritten.replace(STRAY_GLOSS_TAG_RE, '');
+      return;
+    }
+    const wrapper = document.createElement('span');
+    wrapper.className = 'ai-reader-rewrite';
+    wrapper.appendChild(built.fragment);
+    node.replaceWith(wrapper);
+    // These plain-text children are brand new nodes the tree walker hasn't
+    // seen — without this they'd look like fresh unprocessed content on the
+    // next SPA-nav rescan and get sent back to the AI a second time.
+    for (const t of built.plainNodes) state.trackedNodes.add(t);
+    state.rewriteWrappers.set(node, wrapper);
   }
 
   async function processNodeBatch(nodes, gen) {
-    setLoading(nodes, true);
+    // Captured once, up front: applyRewrite() may detach a node from the DOM
+    // (node.replaceWith(wrapper) when it contains a gloss), so re-deriving
+    // parentElement from `nodes` afterwards would silently miss those
+    // elements and leave their loading outline stuck on.
+    const els = new Set(nodes.map((n) => n.parentElement).filter(Boolean));
+    for (const el of els) el.classList.add('ai-reader-loading');
     try {
       const texts = nodes.map((n) => n.nodeValue);
       let res;
@@ -130,10 +202,10 @@
       res.results.forEach((rewritten, i) => {
         const node = nodes[i];
         if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
-        if (typeof rewritten === 'string' && rewritten.length) node.nodeValue = rewritten;
+        if (typeof rewritten === 'string' && rewritten.length) applyRewrite(node, rewritten);
       });
     } finally {
-      setLoading(nodes, false);
+      for (const el of els) el.classList.remove('ai-reader-loading');
     }
   }
 
@@ -192,12 +264,15 @@
         scanAndObserve(gen);
       }, NAV_DEBOUNCE_MS);
     });
-    // The batch pipeline only ever touches nodeValue (characterData), so it
-    // never triggers this by itself — but inserting a gloss span IS a
-    // childList change, and can split an already-processed text node into a
-    // head + a brand new tail (see insertGlossNode). scanAndObserve() must
-    // not treat that tail as fresh unprocessed content, which is exactly
-    // what state.glossTailNodes is filtered against there.
+    // The batch pipeline usually only touches nodeValue (characterData), so
+    // it doesn't trigger this itself — except when a rewrite contains an
+    // in-line gloss, where applyRewrite() replaces the text node with a
+    // wrapper element (a childList change). Its new plain-text children are
+    // added to state.trackedNodes right away so scanAndObserve() doesn't
+    // mistake them for fresh unprocessed content. Alt+select's gloss
+    // insertion is the same kind of change, but can additionally split an
+    // already-processed text node into a head + a brand new tail (see
+    // insertGlossNode) — state.glossTailNodes covers that tail the same way.
     state.navObserver.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -312,9 +387,9 @@
   // Independent of B1 mode: holding Alt while selecting a word or sentence
   // anywhere on the page asks the AI for a short gloss and appends it right
   // after the selection, using the same gloss rules as the B1 rewrite. This
-  // necessarily inserts new content (the explanation has to go somewhere),
-  // unlike the rest of the extension which never touches layout — that's
-  // expected here since the reader explicitly asked for an annotation.
+  // necessarily inserts new content (the explanation has to go somewhere) —
+  // expected here since the reader explicitly asked for an annotation, same
+  // as the in-line <ai-gloss> case in applyRewrite().
 
   function getExplainContext(range) {
     const container = range.commonAncestorContainer;
@@ -436,9 +511,18 @@
     stopNavWatcher();
     state.trackedNodes = new WeakSet();
     for (const [node, original] of state.originalMap.entries()) {
-      node.nodeValue = original;
+      const wrapper = state.rewriteWrappers.get(node);
+      if (wrapper) {
+        // node itself was detached by applyRewrite()'s replaceWith — put a
+        // fresh plain text node with the original text where the wrapper is,
+        // instead of writing nodeValue onto the now-disconnected node.
+        wrapper.replaceWith(document.createTextNode(original));
+      } else {
+        node.nodeValue = original;
+      }
     }
     state.originalMap.clear();
+    state.rewriteWrappers.clear();
     for (const tailNode of state.glossTailNodes) {
       tailNode.remove();
     }
