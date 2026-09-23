@@ -54,7 +54,7 @@ async function persist() {
   if ((provider === 'custom' || provider === 'ollama') && baseUrl) {
     const granted = await ensureHostPermission(baseUrl);
     if (!granted) {
-      showResult('未授权访问该地址，已取消保存。', true);
+      showResult('Access to this address was not granted; save canceled.', true);
       return;
     }
   }
@@ -65,7 +65,7 @@ async function persist() {
     baseUrl,
     model: modelEl.value.trim(),
   });
-  showResult('已保存', false);
+  showResult('Saved', false);
 }
 
 async function ensureHostPermission(baseUrl) {
@@ -74,7 +74,7 @@ async function ensureHostPermission(baseUrl) {
     const url = new URL(baseUrl);
     origin = `${url.protocol}//${url.host}/*`;
   } catch {
-    showResult('Base URL 格式不正确', true);
+    showResult('Invalid Base URL', true);
     return false;
   }
   const has = await chrome.permissions.contains({ origins: [origin] });
@@ -83,13 +83,13 @@ async function ensureHostPermission(baseUrl) {
 }
 
 testBtn.addEventListener('click', async () => {
-  showResult('测试中…', false);
+  showResult('Testing…', false);
   try {
     const provider = providerEl.value;
     const baseUrl = baseUrlEl.value.trim();
     if ((provider === 'custom' || provider === 'ollama') && baseUrl) {
       const granted = await ensureHostPermission(baseUrl);
-      if (!granted) throw new Error('未授权访问该地址');
+      if (!granted) throw new Error('Access to this address was not granted');
     }
     const settings = {
       provider,
@@ -100,13 +100,13 @@ testBtn.addEventListener('click', async () => {
     const [rewritten] = await processBatch(settings, [
       'The implementation of the new policy was met with considerable reluctance from employees.',
     ]);
-    showResult(`连接成功，示例改写结果：${rewritten}`, false);
+    showResult(`Connected. Example rewrite: ${rewritten}`, false);
   } catch (err) {
-    showResult('测试失败：' + (err?.message || err), true);
+    showResult('Test failed: ' + (err?.message || err), true);
   }
 });
 
 function showResult(text, isError) {
   resultEl.textContent = text;
-  resultEl.className = 'result' + (isError ? ' error' : text === '已保存' || text.startsWith('连接成功') ? ' success' : '');
+  resultEl.className = 'result' + (isError ? ' error' : text === 'Saved' || text.startsWith('Connected') ? ' success' : '');
 }

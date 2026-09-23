@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI 网页阅读助手 · B1 英文简化",
+  "name": "AI Web Reader",
   "version": "0.1.0",
-  "description": "用你自己配置的 AI 模型（OpenAI、Anthropic Claude、Ollama Cloud/本地或任意 OpenAI 兼容接口），把网页正文原地改写为 B1 难度英文，便于阅读练习；不改变页面排版，随时可还原。",
+  "description": "Use your own configured AI model (OpenAI, Anthropic Claude, Ollama Cloud/local, or any OpenAI-compatible API) to rewrite webpage text in place for easier reading, without changing the page layout. Restore the original at any time.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

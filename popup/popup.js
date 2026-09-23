@@ -3,7 +3,7 @@ import { getSettings } from '../lib/storage.js';
 // Broad host access, requested once (and only from here — a proper
 // extension page, since chrome.permissions.request needs a user-gesture
 // page context, not the background service worker), so the background can
-// re-inject and auto-continue B1 mode on pages you navigate to afterwards.
+// re-inject and auto-continue rewrite mode on pages you navigate to afterwards.
 const CROSS_PAGE_ORIGINS = ['http://*/*', 'https://*/*'];
 
 const processBtn = document.getElementById('processBtn');
@@ -19,14 +19,14 @@ init();
 async function init() {
   const settings = await getSettings();
   if (!settings.provider) {
-    warningEl.textContent = '请先在“AI 服务商设置”中配置服务商和 API Key';
+    warningEl.textContent = 'Please configure a provider and API key in "AI Provider Settings" first';
     warningEl.classList.remove('hidden');
   }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) {
     processBtn.disabled = true;
-    setStatus('当前页面不支持处理');
+    setStatus("This page can't be processed");
     return;
   }
   currentTabId = tab.id;
@@ -50,23 +50,23 @@ processBtn.addEventListener('click', async () => {
     if (isActive) {
       await chrome.tabs.sendMessage(currentTabId, { type: 'RESTORE' });
       isActive = false;
-      setStatus('已还原原文');
+      setStatus('Original text restored');
     } else {
-      setStatus('正在开启 B1 模式…');
+      setStatus('Turning on rewrite mode…');
       await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ['content/content-script.js'] });
       await chrome.scripting.insertCSS({ target: { tabId: currentTabId }, files: ['content/content-style.css'] });
       const res = await chrome.tabs.sendMessage(currentTabId, { type: 'START_PROCESS', mode: 'page' });
-      if (!res?.ok) throw new Error(res?.error || '处理失败');
+      if (!res?.ok) throw new Error(res?.error || 'Processing failed');
       isActive = true;
       const canFollowNav = await ensureCrossPageHostPermission().catch(() => false);
       setStatus(
         canFollowNav
-          ? '已开启，下滑或跳转到新页面都会持续处理'
-          : '已开启；未授权跨页面权限，跳转到新页面需要再次点击'
+          ? 'On — scrolling or navigating to a new page will keep processing'
+          : 'On — cross-page permission not granted; click again after navigating to a new page'
       );
     }
   } catch (err) {
-    setStatus('出错：' + (err?.message || err));
+    setStatus('Error: ' + (err?.message || err));
   } finally {
     processBtn.disabled = false;
     updateButton();
@@ -80,7 +80,7 @@ async function ensureCrossPageHostPermission() {
 }
 
 function updateButton() {
-  processBtn.textContent = isActive ? '还原原文' : '转为 B1 英文';
+  processBtn.textContent = isActive ? 'Restore Original' : 'Rewrite';
 }
 
 function setStatus(text) {
