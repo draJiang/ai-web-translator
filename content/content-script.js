@@ -37,6 +37,7 @@
     busy: false, // a batch request is currently in flight
     generation: 0, // bumped on every start/restore so stale async results are dropped
     originalMap: new Map(), // text node -> original text
+    rewriteCache: new Map(), // original text -> rewritten text, survives restore() so turning rewrite mode back on doesn't re-call the API for text seen before
     trackedNodes: new WeakSet(), // nodes already scheduled at least once (processed or pending)
     observer: null,
     elToSegments: null, // Element -> segment[] awaiting that element's visibility
@@ -190,20 +191,36 @@
     const els = new Set(nodes.map((n) => n.parentElement).filter(Boolean));
     for (const el of els) el.classList.add('ai-reader-loading');
     try {
-      const texts = nodes.map((n) => n.nodeValue);
-      let res;
-      try {
-        res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts });
-      } catch (err) {
-        throw new Error(err?.message || 'Failed to communicate with the extension background');
+      // A node's rewrite depends only on its own text (see PROCESS_BATCH in
+      // the background worker — each text is rewritten independently), so a
+      // cache keyed on the original string is valid across restore()/re-run
+      // cycles, not just within one. Only texts we haven't rewritten before
+      // go to the API.
+      const toFetchTexts = [];
+      for (const node of nodes) {
+        const text = node.nodeValue;
+        if (!state.rewriteCache.has(text) && !toFetchTexts.includes(text)) toFetchTexts.push(text);
       }
-      if (gen !== state.generation) return; // superseded by a restore/new run — discard
-      if (!res?.ok) throw new Error(res?.error || 'Processing request failed');
-      res.results.forEach((rewritten, i) => {
-        const node = nodes[i];
+      if (toFetchTexts.length) {
+        let res;
+        try {
+          res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts: toFetchTexts });
+        } catch (err) {
+          throw new Error(err?.message || 'Failed to communicate with the extension background');
+        }
+        if (gen !== state.generation) return; // superseded by a restore/new run — discard
+        if (!res?.ok) throw new Error(res?.error || 'Processing request failed');
+        res.results.forEach((rewritten, i) => {
+          if (typeof rewritten === 'string' && rewritten.length) {
+            state.rewriteCache.set(toFetchTexts[i], rewritten);
+          }
+        });
+      }
+      for (const node of nodes) {
         if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
-        if (typeof rewritten === 'string' && rewritten.length) applyRewrite(node, rewritten);
-      });
+        const rewritten = state.rewriteCache.get(node.nodeValue);
+        if (rewritten) applyRewrite(node, rewritten);
+      }
     } finally {
       for (const el of els) el.classList.remove('ai-reader-loading');
     }
