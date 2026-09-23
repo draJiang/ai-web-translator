@@ -1,8 +1,21 @@
 import { getSettings } from '../lib/storage.js';
 import { processBatch, explainSelection } from '../lib/providers.js';
 
-const ICONS_DEFAULT = { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
-const ICONS_ACTIVE = { 16: 'icons/icon16-active.png', 48: 'icons/icon48-active.png', 128: 'icons/icon128-active.png' };
+// chrome.action.setIcon's `path` option must be resolved via chrome.runtime.getURL()
+// here — plain relative strings like 'icons/icon16.png' resolve against this script's
+// own location (background/), not the extension root, so the fetch 404s and setIcon
+// silently no-ops (the .catch below swallows it), leaving the icon stuck on whatever
+// default_icon manifest.json declared no matter what state we pass in.
+const ICONS_DEFAULT = {
+  16: chrome.runtime.getURL('icons/icon16.png'),
+  48: chrome.runtime.getURL('icons/icon48.png'),
+  128: chrome.runtime.getURL('icons/icon128.png'),
+};
+const ICONS_ACTIVE = {
+  16: chrome.runtime.getURL('icons/icon16-active.png'),
+  48: chrome.runtime.getURL('icons/icon48-active.png'),
+  128: chrome.runtime.getURL('icons/icon128-active.png'),
+};
 
 // Which tabs currently have B1 mode turned on, kept in session storage (not
 // synced, cleared when the browser closes) so a full-page navigation can
