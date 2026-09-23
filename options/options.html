@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI 网页阅读助手 - 设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>AI 服务商设置</h1>
+      <form id="settingsForm">
+        <label class="field">
+          <span>AI 服务商</span>
+          <select id="provider">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="ollama">Ollama（Cloud / 本地）</option>
+            <option value="custom">自定义（OpenAI 兼容接口）</option>
+          </select>
+        </label>
+
+        <label class="field" id="apiKeyField">
+          <span>API Key</span>
+          <input type="password" id="apiKey" autocomplete="off" placeholder="sk-..." />
+        </label>
+
+        <label class="field" id="baseUrlField">
+          <span>Base URL</span>
+          <input type="text" id="baseUrl" placeholder="https://ollama.com 或 http://localhost:11434" />
+        </label>
+
+        <label class="field">
+          <span>模型名称</span>
+          <input type="text" id="model" placeholder="例如 gpt-4o-mini / claude-haiku-4-5 / gemma4:31b" />
+        </label>
+
+        <div class="actions">
+          <button type="submit" class="primary">保存</button>
+          <button type="button" id="testBtn">测试连接</button>
+        </div>
+        <p id="result" class="result"></p>
+      </form>
+
+      <section class="hint">
+        <h2>说明</h2>
+        <ul>
+          <li>当前版本固定使用一个内置 Prompt：把网页英文正文改写为 <strong>CEFR B1</strong> 难度，保留原意、缩短长句、替换生僻词，保留的难词附上简短英文释义，方便边读边学。</li>
+          <li><strong>OpenAI</strong>：调用 <code>api.openai.com/v1/chat/completions</code>，需要 OpenAI API Key。</li>
+          <li><strong>Anthropic Claude</strong>：调用 <code>api.anthropic.com/v1/messages</code>，需要 Anthropic API Key。</li>
+          <li><strong>Ollama</strong>：默认连接 Ollama Cloud（<code>https://ollama.com</code>），填入你的 Ollama API Key；若用本地 Ollama，把 Base URL 改成 <code>http://localhost:11434</code>，一般无需 API Key。</li>
+          <li><strong>自定义</strong>：任意兼容 OpenAI <code>/chat/completions</code> 协议的服务（如自建网关、其它模型供应商）。</li>
+          <li>更换 Base URL 到官方以外的地址时，浏览器会弹出一次性授权确认，这是 Chrome 扩展的最小权限机制。</li>
+          <li>API Key 只保存在浏览器本地存储（<code>chrome.storage.local</code>），不会上传到你选择的 AI 服务商之外的任何服务器。</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

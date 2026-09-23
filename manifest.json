@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "AI 网页阅读助手 · B1 英文简化",
+  "version": "0.1.0",
+  "description": "用你自己配置的 AI 模型（OpenAI、Anthropic Claude、Ollama Cloud/本地或任意 OpenAI 兼容接口），把网页正文原地改写为 B1 难度英文，便于阅读练习；不改变页面排版，随时可还原。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "options_page": "options/options.html",
+  "permissions": ["storage", "scripting", "activeTab", "contextMenus"],
+  "host_permissions": [
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://ollama.com/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"]
+}

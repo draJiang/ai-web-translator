@@ -1,0 +1,25 @@
+.ai-reader-status {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  background: rgba(20, 20, 20, 0.85);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.ai-reader-status--show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ai-reader-status--error {
+  background: rgba(180, 30, 30, 0.9);
+}
