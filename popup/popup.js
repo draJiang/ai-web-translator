@@ -1,5 +1,11 @@
 import { getSettings } from '../lib/storage.js';
 
+// Broad host access, requested once (and only from here — a proper
+// extension page, since chrome.permissions.request needs a user-gesture
+// page context, not the background service worker), so the background can
+// re-inject and auto-continue B1 mode on pages you navigate to afterwards.
+const CROSS_PAGE_ORIGINS = ['http://*/*', 'https://*/*'];
+
 const processBtn = document.getElementById('processBtn');
 const statusEl = document.getElementById('status');
 const warningEl = document.getElementById('warning');
@@ -52,7 +58,12 @@ processBtn.addEventListener('click', async () => {
       const res = await chrome.tabs.sendMessage(currentTabId, { type: 'START_PROCESS', mode: 'page' });
       if (!res?.ok) throw new Error(res?.error || '处理失败');
       isActive = true;
-      setStatus('已开启，页面下滑时会持续处理新内容');
+      const canFollowNav = await ensureCrossPageHostPermission().catch(() => false);
+      setStatus(
+        canFollowNav
+          ? '已开启，下滑或跳转到新页面都会持续处理'
+          : '已开启；未授权跨页面权限，跳转到新页面需要再次点击'
+      );
     }
   } catch (err) {
     setStatus('出错：' + (err?.message || err));
@@ -61,6 +72,12 @@ processBtn.addEventListener('click', async () => {
     updateButton();
   }
 });
+
+async function ensureCrossPageHostPermission() {
+  const has = await chrome.permissions.contains({ origins: CROSS_PAGE_ORIGINS });
+  if (has) return true;
+  return chrome.permissions.request({ origins: CROSS_PAGE_ORIGINS });
+}
 
 function updateButton() {
   processBtn.textContent = isActive ? '还原原文' : '转为 B1 英文';
