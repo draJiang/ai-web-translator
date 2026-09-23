@@ -171,7 +171,7 @@
   function scanAndObserve(gen) {
     const root = getMainRoot();
     const nodes = collectTextNodes(root).filter(
-      (n) => !state.originalMap.has(n) && !state.trackedNodes.has(n)
+      (n) => !state.originalMap.has(n) && !state.trackedNodes.has(n) && !state.glossTailNodes.has(n)
     );
     if (!nodes.length) return;
     for (const n of nodes) state.trackedNodes.add(n);
@@ -192,8 +192,12 @@
         scanAndObserve(gen);
       }, NAV_DEBOUNCE_MS);
     });
-    // Our own writes only ever touch nodeValue (characterData), never
-    // childList, so this never re-triggers itself.
+    // The batch pipeline only ever touches nodeValue (characterData), so it
+    // never triggers this by itself — but inserting a gloss span IS a
+    // childList change, and can split an already-processed text node into a
+    // head + a brand new tail (see insertGlossNode). scanAndObserve() must
+    // not treat that tail as fresh unprocessed content, which is exactly
+    // what state.glossTailNodes is filtered against there.
     state.navObserver.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -322,7 +326,11 @@
     return text.slice(0, 400);
   }
 
-  function insertGloss(range, explanation) {
+  // Inserts the gloss element right after the selection — either a "(……)"
+  // loading placeholder or, when called with a final explanation already in
+  // hand, the finished gloss. Returns the inserted element so the caller can
+  // update or remove it later.
+  function insertGlossNode(range, text) {
     const insertionPoint = range.cloneRange();
     insertionPoint.collapse(false); // end of the original selection
 
@@ -346,7 +354,7 @@
 
     const gloss = document.createElement('span');
     gloss.className = 'ai-reader-gloss ai-reader-ignore';
-    gloss.textContent = ` (${explanation})`;
+    gloss.textContent = ` (${text})`;
     insertionPoint.insertNode(gloss);
     state.glossElements.add(gloss);
 
@@ -356,6 +364,12 @@
         state.glossTailNodes.add(tailNode);
       }
     }
+    return gloss;
+  }
+
+  function removeGloss(gloss) {
+    state.glossElements.delete(gloss);
+    gloss.remove();
   }
 
   async function explainRange(range, text) {
@@ -363,10 +377,17 @@
       showStatus('选中内容过长，请选择一个单词或一句话', 2500, true);
       return;
     }
-    // Reuse the same "currently being sent to the AI" outline the batch
-    // pipeline uses, so the two features share one visual language.
-    const selectedNodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
-    setLoading(selectedNodes, true);
+    // "ethnicity" -> "ethnicity(……)" while the request is in flight, so the
+    // loading state sits right next to the word it's about instead of
+    // outlining the whole surrounding paragraph.
+    let gloss;
+    try {
+      gloss = insertGlossNode(range, '……');
+      gloss.classList.add('ai-reader-gloss--loading');
+    } catch (err) {
+      showStatus('无法在此处插入解释：' + (err?.message || err), 3000, true);
+      return;
+    }
     showStatus('正在生成解释…');
     try {
       const context = getExplainContext(range);
@@ -374,19 +395,20 @@
       if (!res?.ok) throw new Error(res?.error || '解释请求失败');
       const explanation = (res.explanation || '').trim();
       if (!explanation) {
+        removeGloss(gloss);
         showStatus('未能为所选内容生成解释', 2000, true);
         return;
       }
-      insertGloss(range, explanation);
+      gloss.textContent = ` (${explanation})`;
+      gloss.classList.remove('ai-reader-gloss--loading');
       if (!state.active) {
         state.active = true;
         notifyState();
       }
       showStatus('已添加解释', 1200);
     } catch (err) {
+      removeGloss(gloss);
       showStatus('解释失败：' + (err?.message || err), 3000, true);
-    } finally {
-      setLoading(selectedNodes, false);
     }
   }
 

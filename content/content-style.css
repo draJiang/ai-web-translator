@@ -60,3 +60,25 @@
   font-style: italic;
   opacity: 0.8;
 }
+
+/* The "(……)" placeholder shown right after the selection while its
+   explanation is being generated, before it's replaced with the real text. */
+.ai-reader-gloss--loading {
+  animation: ai-reader-gloss-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ai-reader-gloss-pulse {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-reader-gloss--loading {
+    animation: none;
+    opacity: 0.6;
+  }
+}
