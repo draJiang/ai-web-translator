@@ -8,11 +8,13 @@ import { processBatch, explainSelection } from '../lib/providers.js';
 // default_icon manifest.json declared no matter what state we pass in.
 const ICONS_DEFAULT = {
   16: chrome.runtime.getURL('icons/icon16.png'),
+  32: chrome.runtime.getURL('icons/icon32.png'),
   48: chrome.runtime.getURL('icons/icon48.png'),
   128: chrome.runtime.getURL('icons/icon128.png'),
 };
 const ICONS_ACTIVE = {
   16: chrome.runtime.getURL('icons/icon16-active.png'),
+  32: chrome.runtime.getURL('icons/icon32-active.png'),
   48: chrome.runtime.getURL('icons/icon48-active.png'),
   128: chrome.runtime.getURL('icons/icon128-active.png'),
 };
