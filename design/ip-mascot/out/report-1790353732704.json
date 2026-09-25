@@ -1,0 +1,122 @@
+[
+  {
+    "label": "A1",
+    "subject": "owl",
+    "rationale": "读懂英文：猫头鹰是阅读和智慧的经典形象",
+    "corner": "lower-left corner",
+    "colors": {
+      "ip": [
+        "warm cream",
+        "soft amber"
+      ],
+      "background": "muted navy blue"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/A1.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted navy blue. Keep muted navy blue visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing owl IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a pair of short, blunt, rounded ear tufts on a round head with two large simple round eyes; a tiny blunt rounded beak serves as the mouth.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, warm cream and soft amber, plus the muted navy blue background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-left corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  },
+  {
+    "label": "A2",
+    "subject": "owl",
+    "rationale": "读懂英文：猫头鹰是阅读和智慧的经典形象",
+    "corner": "lower-right corner",
+    "colors": {
+      "ip": [
+        "warm cream",
+        "soft amber"
+      ],
+      "background": "muted navy blue"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/A2.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted navy blue. Keep muted navy blue visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing owl IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a pair of short, blunt, rounded ear tufts on a round head with two large simple round eyes; a tiny blunt rounded beak serves as the mouth.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, warm cream and soft amber, plus the muted navy blue background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-right corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  },
+  {
+    "label": "B1",
+    "subject": "hamster",
+    "rationale": "把长难句嚼碎成小口：仓鼠鼓着腮帮慢慢嚼",
+    "corner": "lower-left corner",
+    "colors": {
+      "ip": [
+        "creamy white",
+        "warm apricot orange"
+      ],
+      "background": "muted sage green"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/B1.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted sage green. Keep muted sage green visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing hamster IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a pair of big, soft, puffed-out round cheeks, as if gently holding food; two small rounded ears sit on top.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, creamy white and warm apricot orange, plus the muted sage green background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-left corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  },
+  {
+    "label": "B2",
+    "subject": "hamster",
+    "rationale": "把长难句嚼碎成小口：仓鼠鼓着腮帮慢慢嚼",
+    "corner": "lower-right corner",
+    "colors": {
+      "ip": [
+        "creamy white",
+        "warm apricot orange"
+      ],
+      "background": "muted sage green"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/B2.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted sage green. Keep muted sage green visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing hamster IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a pair of big, soft, puffed-out round cheeks, as if gently holding food; two small rounded ears sit on top.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, creamy white and warm apricot orange, plus the muted sage green background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-right corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  },
+  {
+    "label": "C1",
+    "subject": "capybara",
+    "rationale": "读英文不再紧张：水豚代表放松、不费劲",
+    "corner": "lower-left corner",
+    "colors": {
+      "ip": [
+        "warm caramel brown",
+        "dark chocolate brown"
+      ],
+      "background": "muted dusty teal"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/C1.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted dusty teal. Keep muted dusty teal visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing capybara IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a broad, blunt, rounded-rectangle head with two tiny rounded ears and calm, relaxed half-closed eyes.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, warm caramel brown and dark chocolate brown, plus the muted dusty teal background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-left corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  },
+  {
+    "label": "C2",
+    "subject": "capybara",
+    "rationale": "读英文不再紧张：水豚代表放松、不费劲",
+    "corner": "lower-right corner",
+    "colors": {
+      "ip": [
+        "warm caramel brown",
+        "dark chocolate brown"
+      ],
+      "background": "muted dusty teal"
+    },
+    "path": "/home/user/ai-web-translator/design/ip-mascot/out/C2.png",
+    "width": 1536,
+    "height": 1536,
+    "model": "gpt-image-2",
+    "requestedSize": "1536x1536",
+    "constraintMode": "main-prompt constraints",
+    "prompt": "Create one complete full-bleed 1:1 square image.\nBackground: fill the entire square with solid muted dusty teal. Keep muted dusty teal visible in every open area and in the corners not occupied by the character; the assigned emergence corner must be occupied by the character.\nSubject: place one extremely simplified, cute, endearing capybara IP character on the background, reduced to one soft rounded continuous silhouette and one defining feature. The defining feature is a broad, blunt, rounded-rectangle head with two tiny rounded ears and calm, relaxed half-closed eyes.\nComplexity: use only 4–7 large basic shapes and at most two broad internal color regions. Use two simple eyes and add one tiny mouth only when it helps the expression. Remove every nonessential line, outline, anatomical detail, texture, and decoration. Keep the character readable at 32 × 32.\nColor behavior: use exactly three semantic colors in the complete image: exactly two IP base colors, warm caramel brown and dark chocolate brown, plus the muted dusty teal background color. Organize both IP colors into broad purposeful masses, and reuse them for facial marks. Lower the background saturation slightly so it feels gently muted and restrained while remaining clearly chromatic, clean, and intentional rather than gray or muddy. Keep the IP, facial marks, and background clearly separated.\nComposition: keep the character upright and emerging from the assigned lower-right corner, filling about 85–95% of the square so it remains visually dominant. Cropping at the bottom or assigned side is welcome when it strengthens the corner emergence. Preserve both paired identifying features. Never center or bottom-center the character.\nStyle: make simplification, cuteness, and lovable baby-like appeal the strongest qualities. Use large soft forms, compact proportions, thick rounded contours, and an ultra-clean graphic treatment. Prefer one clear shape over several explanatory details. Add an extremely, extremely subtle, almost imperceptible sense of depth through a barely-there neo-skeuomorphic treatment.\nFinish: show only the character on the full-canvas background, with clean surfaces and normal square outer corners.\nConstraints: Use no text or watermark. Add no borders, frames, cards, or presentation masks. Include one character only, with no extra subjects or scenery. Use no fragile lines, sharp tips, unnecessary outlines, tiny details, or decorative marks. Add no photorealistic material, dramatic bevel, glossy hotspot, deep occlusion, extrusion, strong three-dimensional rendering, or external cast shadow. Keep the background solid and uniform, with no texture, vignette, or lighting variation."
+  }
+]

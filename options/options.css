@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* Theme color, taken from the icon's teal background (#598E8A) and darkened
+     to keep white button text above 4.5:1 contrast. */
+  --brand: #4b7774;
+  --brand-hover: #3f6461;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -82,7 +89,7 @@ h2 {
   padding: 0;
   border: none;
   background: none;
-  color: #2f4de0;
+  color: var(--brand);
   font-size: 12px;
   text-decoration: underline;
 }
@@ -103,10 +110,15 @@ button {
 }
 
 .primary {
-  background: #2f4de0;
+  background: var(--brand);
   color: #fff;
-  border-color: #2f4de0;
+  border-color: var(--brand);
   font-weight: 600;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
 }
 
 .result {

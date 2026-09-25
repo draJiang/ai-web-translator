@@ -28,9 +28,11 @@
    touches color/opacity/background of the text itself — only an outline
    drawn outside the content box — so the original characters stay exactly
    as readable while they're still showing (outline/box-shadow are paint
-   layers, not part of layout, so this can't shift anything around it). */
+   layers, not part of layout, so this can't shift anything around it).
+   rgba(75, 119, 116) is the theme color (#4b7774), spelled out because a
+   custom property on :root would leak into the host page. */
 .ai-reader-loading {
-  outline: 2px solid rgba(47, 77, 224, 0.55);
+  outline: 2px solid rgba(75, 119, 116, 0.55);
   outline-offset: 2px;
   border-radius: 2px;
   animation: ai-reader-pulse 1.4s ease-in-out infinite;
@@ -38,17 +40,17 @@
 
 @keyframes ai-reader-pulse {
   0%, 100% {
-    outline-color: rgba(47, 77, 224, 0.25);
+    outline-color: rgba(75, 119, 116, 0.25);
   }
   50% {
-    outline-color: rgba(47, 77, 224, 0.75);
+    outline-color: rgba(75, 119, 116, 0.75);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-reader-loading {
     animation: none;
-    outline-color: rgba(47, 77, 224, 0.5);
+    outline-color: rgba(75, 119, 116, 0.5);
   }
 }
 

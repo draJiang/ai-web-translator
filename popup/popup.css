@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* Theme color, taken from the icon's teal background (#598E8A) and darkened
+     to keep white button text above 4.5:1 contrast. */
+  --brand: #4b7774;
+  --brand-hover: #3f6461;
+}
+
 body {
   width: 280px;
   margin: 0;
@@ -53,10 +60,15 @@ button {
   padding: 10px;
   border: none;
   border-radius: 8px;
-  background: #2f4de0;
+  background: var(--brand);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
 }
 
 .primary:disabled {
@@ -87,7 +99,7 @@ footer {
 .link {
   background: none;
   border: none;
-  color: #2f4de0;
+  color: var(--brand);
   font-size: 12px;
   padding: 0;
 }
