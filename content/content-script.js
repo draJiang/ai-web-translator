@@ -7,8 +7,14 @@
 
   const SKIP_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT',
-    'CODE', 'PRE', 'IFRAME', 'TITLE', 'SVG',
+    'CODE', 'PRE', 'KBD', 'SAMP', 'VAR', 'TEMPLATE', 'MATH', 'CANVAS',
+    'IFRAME', 'TITLE', 'SVG',
   ]);
+  // Ancestor selector, not just the immediate parent's tagName — syntax
+  // highlighters (Prism, highlight.js) wrap code tokens in nested <span>s,
+  // so a text node's direct parent is rarely CODE/PRE itself. Also honors
+  // the standard translate="no" / .notranslate opt-out convention.
+  const SKIP_SELECTOR = [...SKIP_TAGS].join(',') + ', [translate="no"], .notranslate';
 
   // How far below the viewport (in px) a block is "about to" scroll into
   // view and should be pre-processed, instead of waiting until it's visible.
@@ -66,7 +72,7 @@
         if (!text || !text.trim()) return NodeFilter.FILTER_REJECT;
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(SKIP_SELECTOR)) return NodeFilter.FILTER_REJECT;
         if (parent.closest('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         if (parent.closest('.ai-reader-ignore')) return NodeFilter.FILTER_REJECT;
         if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
