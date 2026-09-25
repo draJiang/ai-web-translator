@@ -64,6 +64,52 @@ export const VERSIONS = [
   </g>
   <circle cx="48" cy="88" r="11" fill="#fff" stroke="#1F2B4D" stroke-width="6"/>`,
   },
+  // Round 2: simpler takes on A / C / D.
+  {
+    id: 'a1-untangle-two-lines', from: 'v1-untangle', name: 'A1 理顺 · 两行', color: '#1F2B4D',
+    idea: '去掉第三行和双色，只剩两行：上面一行先起伏两下再拉平，下面一行是普通正文。',
+    art: `${bg('#1F2B4D')}
+  <path d="M20 37C28 37 30 59 38 59C46 59 48 40 56 40C63 40 64 53 71 53C76 53 77 48 83 48H108M20 84H84" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
+  {
+    id: 'a2-untangle-one-line', from: 'v1-untangle', name: 'A2 理顺 · 一笔', color: '#1F2B4D',
+    idea: '整个图标只有一笔：前半段是逐渐变小的波浪（琥珀色），后半段拉成直线（白色）。',
+    art: `${bg('#1F2B4D')}
+  <g fill="none" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 53C28 53 30 75 38 75C46 75 48 56 56 56C63 56 64 69 71 69C76 69 77 64 83 64" stroke="#FFB547"/>
+    <path d="M83 64H108" stroke="#fff"/>
+  </g>`,
+  },
+  {
+    id: 'c1-book', from: 'v3-book', name: 'C1 书页', color: '#F26B3A',
+    idea: '只有一本摊开的书，放大居中，去掉火花和页面上的线。',
+    art: `${bg('#F26B3A')}
+  <path fill="#fff" d="M61 38C50 31 36 29 20 31V92C36 91 50 93 61 100Z"/>
+  <path fill="#fff" d="M67 38C78 31 92 29 108 31V92C92 91 78 93 67 100Z"/>`,
+  },
+  {
+    id: 'c2-book-sparkle', from: 'v3-book', name: 'C2 书页 · 镂空火花', color: '#F26B3A',
+    idea: '火花不再单独飘在上方，而是镂空在右页里。还是一个整体形状，AI 的意思也保留了。',
+    art: `${bg('#F26B3A')}
+  <path fill="#fff" d="M61 38C50 31 36 29 20 31V92C36 91 50 93 61 100Z"/>
+  <path fill="#fff" d="M67 38C78 31 92 29 108 31V92C92 91 78 93 67 100Z"/>
+  ${sparkle(87, 60, 13, '#F26B3A')}`,
+  },
+  {
+    id: 'd1-letter', from: 'v4-letter', name: 'D1 字母 a', color: '#0D9488',
+    idea: '只留一个放大居中的小写 a，不要火花。最干净，16px 下最清楚。',
+    art: `${bg('#0D9488')}
+  <circle cx="60" cy="66" r="22" fill="none" stroke="#fff" stroke-width="15"/>
+  <path d="M82 42V88" stroke="#fff" stroke-width="15" stroke-linecap="round"/>`,
+  },
+  {
+    id: 'd2-letter-sparkle', from: 'v4-letter', name: 'D2 字母 a · 火花收笔', color: '#0D9488',
+    idea: 'a 的竖笔顶端直接收成一颗火花，字母和 AI 符号合成一个形状，不再是两个分开的元素。',
+    art: `${bg('#0D9488')}
+  <circle cx="58" cy="72" r="21" fill="none" stroke="#fff" stroke-width="14"/>
+  <path d="M79 54V94" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+  ${sparkle(79, 33, 17, '#fff')}`,
+  },
 ];
 
 export const svg = (v, active) =>
