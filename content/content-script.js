@@ -6,7 +6,7 @@
   window.__aiReaderInjected = true;
 
   const SKIP_TAGS = new Set([
-    'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT',
+    'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'BUTTON',
     'CODE', 'PRE', 'KBD', 'SAMP', 'VAR', 'TEMPLATE', 'MATH', 'CANVAS',
     'IFRAME', 'TITLE', 'SVG',
   ]);
