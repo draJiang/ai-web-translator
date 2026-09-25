@@ -10,6 +10,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const OUT = dirname(fileURLToPath(import.meta.url));
 
 const bg = (fill) => `<rect x="4" y="4" width="120" height="120" rx="28" fill="${fill}"/>`;
+// Full-bleed tile: the toolbar draws icons at 16/32px, where a 4px inset costs a visible pixel.
+const bgFull = (fill) => `<rect width="128" height="128" rx="28" fill="${fill}"/>`;
 const sparkle = (cx, cy, r, fill) => {
   const k = r * 0.18;
   return `<path fill="${fill}" d="M${cx} ${cy - r} C${cx + k} ${cy - k} ${cx + k} ${cy - k} ${cx + r} ${cy} C${cx + k} ${cy + k} ${cx + k} ${cy + k} ${cx} ${cy + r} C${cx - k} ${cy + k} ${cx - k} ${cy + k} ${cx - r} ${cy} C${cx - k} ${cy - k} ${cx - k} ${cy - k} ${cx} ${cy - r}Z"/>`;
@@ -110,11 +112,27 @@ export const VERSIONS = [
   <path d="M79 54V94" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
   ${sparkle(79, 33, 17, '#fff')}`,
   },
+  // Round 3: A2 enlarged for the toolbar. 16/32px get their own simpler, heavier wave
+  // (one swing, then flat) because the 2.5-swing wave shrinks to a thin scribble there.
+  {
+    id: 'a3-untangle-bold', from: 'v1-untangle', name: 'A3 理顺 · 一笔（加粗）', color: '#2D4486',
+    idea: 'A2 放大加粗、铺满方块，底色提亮到能在深色工具栏上看出轮廓；16/32px 用只起伏一次的粗线版本，在工具栏里和其他图标一样醒目。',
+    art: `${bgFull('#2D4486')}
+  <g fill="none" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 49C26 49 27 79 35 79C43 79 43 55 51 55C58 55 58 70 65 70C70 70 70 64 76 64" stroke="#FFB547"/>
+    <path d="M76 64H112" stroke="#fff"/>
+  </g>`,
+    artSmall: `${bgFull('#2D4486')}
+  <g fill="none" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 42C33 42 36 86 50 86C62 86 64 64 76 64" stroke="#FFB547"/>
+    <path d="M76 64H110" stroke="#fff"/>
+  </g>`,
+  },
 ];
 
-export const svg = (v, active) =>
+export const svg = (v, active, small = false) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  ${v.art}${active ? '\n  ' + badge : ''}
+  ${small && v.artSmall ? v.artSmall : v.art}${active ? '\n  ' + badge : ''}
 </svg>
 `;
 
@@ -127,10 +145,11 @@ async function main() {
     const dir = join(OUT, v.id);
     mkdirSync(dir, { recursive: true });
     for (const active of [false, true]) {
-      const s = svg(v, active);
       const suffix = active ? '-active' : '';
-      writeFileSync(join(dir, `icon${suffix}.svg`), s);
+      writeFileSync(join(dir, `icon${suffix}.svg`), svg(v, active));
+      if (v.artSmall) writeFileSync(join(dir, `icon-small${suffix}.svg`), svg(v, active, true));
       for (const n of SIZES) {
+        const s = svg(v, active, n <= 32);
         await page.setViewportSize({ width: n, height: n });
         await page.setContent(`<style>html,body{margin:0;background:transparent}svg{display:block;width:${n}px;height:${n}px}</style>${s}`);
         await page.screenshot({ path: join(dir, `icon${n}${suffix}.png`), omitBackground: true });
