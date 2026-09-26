@@ -69,13 +69,17 @@
   pointer-events: auto;
 }
 
+/* The outlines below are !important because some sites kill every outline
+   with a global `* { outline: none !important }` (e.g. sspai.com); a class
+   selector with !important outranks that. */
+
 /* A block whose rewrite failed: original text left untouched, marked with a
    dashed outline (outline only, same reasoning as .ai-reader-loading below)
    and clickable to retry just that block. Declared before .ai-reader-loading
    so the loading outline wins while a retry is in flight. */
 .ai-reader-failed {
-  outline: 1.5px dashed rgba(200, 60, 60, 0.75);
-  outline-offset: 2px;
+  outline: 1.5px dashed rgba(200, 60, 60, 0.75) !important;
+  outline-offset: 2px !important;
   border-radius: 2px;
   cursor: pointer;
 }
@@ -86,27 +90,38 @@
    as readable while they're still showing (outline/box-shadow are paint
    layers, not part of layout, so this can't shift anything around it).
    rgba(75, 119, 116) is the theme color (#4b7774), spelled out because a
-   custom property on :root would leak into the host page. */
+   custom property on :root would leak into the host page.
+   An !important declaration also beats animations, so the pulse can't
+   animate outline-color directly; it animates --ai-reader-outline-color
+   (registered below so it interpolates, and non-inherited so it stays on
+   this element) and the !important outline reads from it. */
+@property --ai-reader-outline-color {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: rgba(75, 119, 116, 0.55);
+}
+
 .ai-reader-loading {
-  outline: 2px solid rgba(75, 119, 116, 0.55);
-  outline-offset: 2px;
+  --ai-reader-outline-color: rgba(75, 119, 116, 0.55);
+  outline: 2px solid var(--ai-reader-outline-color) !important;
+  outline-offset: 2px !important;
   border-radius: 2px;
   animation: ai-reader-pulse 1.4s ease-in-out infinite;
 }
 
 @keyframes ai-reader-pulse {
   0%, 100% {
-    outline-color: rgba(75, 119, 116, 0.25);
+    --ai-reader-outline-color: rgba(75, 119, 116, 0.25);
   }
   50% {
-    outline-color: rgba(75, 119, 116, 0.75);
+    --ai-reader-outline-color: rgba(75, 119, 116, 0.75);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-reader-loading {
     animation: none;
-    outline-color: rgba(75, 119, 116, 0.5);
+    --ai-reader-outline-color: rgba(75, 119, 116, 0.5);
   }
 }
 
