@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Web Reader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use your own configured AI model (OpenAI, Anthropic Claude, Ollama Cloud/local, or any OpenAI-compatible API) to rewrite webpage text in place for easier reading, without changing the page layout. Restore the original at any time.",
   "icons": {
     "16": "icons/icon16.png",
