@@ -76,6 +76,37 @@ button {
   cursor: default;
 }
 
+.failed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid #f3c4c4;
+  border-radius: 6px;
+  background: #fdecec;
+  color: #9b1c1c;
+  font-size: 12px;
+}
+
+.failed.hidden {
+  display: none;
+}
+
+.retry {
+  padding: 3px 10px;
+  border: 1px solid #e3a5a5;
+  border-radius: 4px;
+  background: #fff;
+  color: #9b1c1c;
+  font-size: 12px;
+}
+
+.retry:hover {
+  background: #fff6f6;
+}
+
 .status {
   margin: 10px 0 0;
   font-size: 12px;

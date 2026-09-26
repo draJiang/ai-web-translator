@@ -57,14 +57,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getSettings()
       .then((settings) => processBatch(settings, message.texts))
       .then((result) => sendResponse({ ok: true, results: result }))
-      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+      .catch((err) => sendResponse(errorResponse(err)));
     return true; // keep the message channel open for the async response
   }
   if (message?.type === 'EXPLAIN_TEXT') {
     getSettings()
       .then((settings) => explainSelection(settings, message.text, message.context))
       .then((explanation) => sendResponse({ ok: true, explanation }))
-      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+      .catch((err) => sendResponse(errorResponse(err)));
     return true;
   }
   if (message?.type === 'STATE_CHANGED') {
@@ -76,6 +76,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 });
+
+// Errors don't survive structured cloning across the message boundary with
+// their custom fields, so flatten the parts the page needs to decide between
+// "retry later" and "stop until the user fixes something". Anything that
+// isn't a ProviderError (a bug, a storage failure…) is treated as retryable.
+function errorResponse(err) {
+  return {
+    ok: false,
+    error: String(err?.message || err),
+    kind: err?.kind,
+    status: err?.status,
+    retryable: err?.retryable ?? true,
+  };
+}
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A tab's B1 state is per-document: once it starts loading a new one, drop

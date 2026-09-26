@@ -9,6 +9,9 @@ const CROSS_PAGE_ORIGINS = ['http://*/*', 'https://*/*'];
 const processBtn = document.getElementById('processBtn');
 const statusEl = document.getElementById('status');
 const warningEl = document.getElementById('warning');
+const failedRow = document.getElementById('failedRow');
+const failedText = document.getElementById('failedText');
+const retryBtn = document.getElementById('retryBtn');
 document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
 let currentTabId = null;
@@ -36,6 +39,7 @@ async function init() {
     if (res?.ok) {
       isActive = !!res.active;
       updateButton();
+      showFailed(res.failed || 0);
     }
   } catch {
     // content script not injected into this tab yet — that's fine, first
@@ -50,6 +54,7 @@ processBtn.addEventListener('click', async () => {
     if (isActive) {
       await chrome.tabs.sendMessage(currentTabId, { type: 'RESTORE' });
       isActive = false;
+      showFailed(0);
       setStatus('Original text restored');
     } else {
       setStatus('Turning on rewrite mode…');
@@ -72,6 +77,24 @@ processBtn.addEventListener('click', async () => {
     updateButton();
   }
 });
+
+retryBtn.addEventListener('click', async () => {
+  if (!currentTabId) return;
+  try {
+    await chrome.tabs.sendMessage(currentTabId, { type: 'RETRY_FAILED' });
+    showFailed(0);
+    setStatus('Retrying…');
+  } catch (err) {
+    setStatus('Error: ' + (err?.message || err));
+  }
+});
+
+// Only shown when the page has blocks whose rewrite failed (see PING in the
+// content script); the page's own toast has the same Retry.
+function showFailed(count) {
+  failedText.textContent = `${count} ${count === 1 ? 'block' : 'blocks'} failed`;
+  failedRow.classList.toggle('hidden', !count);
+}
 
 async function ensureCrossPageHostPermission() {
   const has = await chrome.permissions.contains({ origins: CROSS_PAGE_ORIGINS });

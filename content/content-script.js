@@ -29,6 +29,10 @@
   // A selection longer than this isn't "a word or a sentence" any more —
   // decline rather than send an oversized ad-hoc explain request.
   const EXPLAIN_MAX_CHARS = 300;
+  // After this many batches fail in a row, stop sending more (newly visible
+  // text keeps queueing) until the user hits Retry — otherwise an outage or a
+  // rate limit turns every scroll into another round of doomed requests.
+  const MAX_CONSECUTIVE_FAILURES = 3;
 
   // The B1 rewrite prompt (lib/prompts.js) wraps an in-line gloss's
   // explanation in this tag so it can be styled like the Alt+select gloss
@@ -54,6 +58,10 @@
     glossElements: new Set(), // <span> nodes inserted by the Alt+select explain feature
     glossTailNodes: new Set(), // text nodes split off by a gloss inserted mid-node; removed (not reverted) on restore
     rewriteWrappers: new Map(), // original text node -> <span> wrapper, for rewrites that contained an in-line gloss
+    failedSegments: new Set(), // segments (or the leftover nodes of one) whose rewrite failed, waiting for Retry
+    paused: false, // set after a non-retryable error or too many failures in a row; drain() stays idle until Retry
+    consecutiveFailures: 0,
+    lastError: null, // most recent batch failure, for the reason shown on the failure toast
   };
 
   function isVisible(el) {
@@ -189,6 +197,10 @@
     state.rewriteWrappers.set(node, wrapper);
   }
 
+  // Returns the nodes that came back without a rewrite (the background could
+  // only salvage part of a malformed AI response — see processBatch() in
+  // lib/providers.js) so the caller can mark just those as failed. Throws if
+  // the request as a whole failed.
   async function processNodeBatch(nodes, gen) {
     // Captured once, up front: applyRewrite() may detach a node from the DOM
     // (node.replaceWith(wrapper) when it contains a gloss), so re-deriving
@@ -212,25 +224,157 @@
         try {
           res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts: toFetchTexts });
         } catch (err) {
-          throw new Error(err?.message || 'Failed to communicate with the extension background');
+          throw messagingError(err);
         }
-        if (gen !== state.generation) return; // superseded by a restore/new run — discard
-        if (!res?.ok) throw new Error(res?.error || 'Processing request failed');
+        if (gen !== state.generation) return []; // superseded by a restore/new run — discard
+        if (!res?.ok) throw responseError(res, 'Processing request failed');
         res.results.forEach((rewritten, i) => {
           if (typeof rewritten === 'string' && rewritten.length) {
             state.rewriteCache.set(toFetchTexts[i], rewritten);
           }
         });
       }
+      const missing = [];
       for (const node of nodes) {
         if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
         const rewritten = state.rewriteCache.get(node.nodeValue);
         if (rewritten) applyRewrite(node, rewritten);
+        else missing.push(node);
       }
+      return missing;
     } finally {
       for (const el of els) el.classList.remove('ai-reader-loading');
     }
   }
+
+  // The background flattens provider errors into plain fields (see
+  // errorResponse() in background/service-worker.js); rebuild an Error that
+  // carries them so failure handling can tell "retry later" from "retrying
+  // won't help until the settings change".
+  function responseError(res, fallback) {
+    const err = new Error(res?.error || fallback);
+    err.kind = res?.kind;
+    err.status = res?.status;
+    err.retryable = res?.retryable ?? true;
+    return err;
+  }
+
+  // sendMessage itself failing: usually the service worker was shut down
+  // mid-request (worth retrying), but after the extension is reloaded this
+  // old content script is orphaned for good and only a page refresh helps.
+  function messagingError(err) {
+    const message = err?.message || 'Failed to communicate with the extension background';
+    const wrapped = new Error(message);
+    if (/context invalidated/i.test(message)) {
+      wrapped.kind = 'context';
+      wrapped.retryable = false;
+    } else {
+      wrapped.retryable = true;
+    }
+    return wrapped;
+  }
+
+  // Used when a request succeeded but some items in it came back empty.
+  function partialResultError() {
+    const err = new Error("Couldn't read part of the AI response");
+    err.kind = 'parse';
+    err.retryable = true;
+    return err;
+  }
+
+  // --- Failure tracking and retry ------------------------------------------
+  //
+  // A failed segment keeps its original text, gets a dashed outline, and
+  // waits in state.failedSegments. Every manual retry — the toast's Retry
+  // button, clicking a failed block, the popup — goes through retrySegments(),
+  // which puts them back at the front of the normal drain() queue.
+
+  function markFailed(seg, err) {
+    seg.queued = false;
+    seg.done = true;
+    seg.el.classList.add('ai-reader-failed');
+    state.failedSegments.add(seg);
+    state.lastError = err;
+  }
+
+  // Nodes that aren't part of a scroll-pipeline segment (selection mode, or
+  // the leftovers of a partially-rewritten one) are regrouped by parent so
+  // they can be retried through the same queue.
+  function markNodesFailed(nodes, err) {
+    for (const seg of buildSegments(nodes)) markFailed(seg, err);
+  }
+
+  function retrySegments(segs) {
+    state.paused = false;
+    state.consecutiveFailures = 0;
+    for (const seg of segs) {
+      state.failedSegments.delete(seg);
+      seg.queued = true;
+      seg.done = false;
+    }
+    // Several segments can share an element (same parent, non-adjacent
+    // text) — only drop the outline once none of them is still failed.
+    for (const seg of segs) {
+      if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
+    }
+    state.queue.unshift(...segs);
+    // Retry could come while the queue was paused with nothing in flight,
+    // or mid-drain — scheduleDrain() covers both.
+    scheduleDrain(state.generation);
+  }
+
+  function retryAllFailed() {
+    retrySegments([...state.failedSegments]);
+  }
+
+  function failureReason(err) {
+    if (!err) return 'Unknown error';
+    if (err.kind === 'context') return 'Extension was updated. Refresh the page, then retry';
+    if (err.retryable === false) {
+      if (err.status === 401 || err.status === 403) return 'API key rejected. Check your settings, then retry';
+      if (err.kind === 'config') return `${err.message}. Check your settings, then retry`;
+      if (err.status) return `Request rejected (${err.status}). Check your settings, then retry`;
+      return `${err.message}. Check your settings, then retry`;
+    }
+    if (err.status === 429) return 'Rate limited (429)';
+    if (err.status >= 500) return `Server error (${err.status})`;
+    if (err.status) return `Request failed (${err.status})`;
+    if (err.kind === 'timeout') return 'Timed out';
+    if (err.kind === 'network') return 'Network error';
+    if (err.kind === 'parse') return "Couldn't read the AI response";
+    return String(err.message || err).slice(0, 60);
+  }
+
+  // What the user sees as "a block" is an element with a dashed outline; one
+  // element can hold several failed segments (text split around a <a>, etc.).
+  function failedBlockCount() {
+    return new Set([...state.failedSegments].map((s) => s.el)).size;
+  }
+
+  function showFailure() {
+    const count = failedBlockCount();
+    if (!count) return;
+    const err = state.lastError;
+    const reason = failureReason(err);
+    let text;
+    if (err?.retryable === false) text = reason;
+    else if (state.paused) text = `Paused after repeated failures · ${reason}`;
+    else text = `${count} ${count === 1 ? 'block' : 'blocks'} failed · ${reason}`;
+    showStatus(text, 0, true, { label: 'Retry', onClick: retryAllFailed });
+  }
+
+  document.addEventListener('click', (event) => {
+    if (event.altKey) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const el = target?.closest('.ai-reader-failed');
+    if (!el) return;
+    // Leave real controls inside a failed block (links, buttons…) alone, and
+    // don't treat the end of a drag-to-select as a click.
+    if (target.closest('a, button, input, select, textarea, label, summary')) return;
+    if (!window.getSelection()?.isCollapsed) return;
+    const segs = [...state.failedSegments].filter((s) => s.el === el);
+    if (segs.length) retrySegments(segs);
+  });
 
   // --- Lazy, scroll-driven pipeline for "process whole page" -------------
 
@@ -327,7 +471,7 @@
   }
 
   function scheduleDrain(gen) {
-    if (state.draining) return;
+    if (state.draining || state.paused) return;
     drain(gen);
   }
 
@@ -336,8 +480,9 @@
     state.busy = true;
     showStatus('Rewriting…');
     try {
-      while (state.queue.length && gen === state.generation) {
+      while (state.queue.length && gen === state.generation && !state.paused) {
         const batch = [];
+        const batchSegs = [];
         let chars = 0;
         while (state.queue.length) {
           const seg = state.queue[0];
@@ -347,17 +492,37 @@
           }
           state.queue.shift();
           seg.done = true;
+          batchSegs.push(seg);
           batch.push(...seg.nodes);
           chars += segChars;
         }
         if (!batch.length) break;
         try {
-          await processNodeBatch(batch, gen);
+          const missing = new Set(await processNodeBatch(batch, gen));
+          if (gen !== state.generation) break;
+          state.consecutiveFailures = 0;
+          if (missing.size) {
+            // Only the nodes that came back empty — the rest of the segment
+            // was already rewritten in place and mustn't be sent again.
+            const err = partialResultError();
+            for (const seg of batchSegs) {
+              const failedNodes = seg.nodes.filter((n) => missing.has(n));
+              if (failedNodes.length) markNodesFailed(failedNodes, err);
+            }
+          }
         } catch (err) {
-          showStatus('Processing failed: ' + (err?.message || err), 4000, true);
+          if (gen !== state.generation) break;
+          for (const seg of batchSegs) markFailed(seg, err);
+          state.consecutiveFailures += 1;
+          if (err?.retryable === false || state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            state.paused = true;
+          }
         }
       }
-      if (gen === state.generation) showStatus('Rewritten', 1200);
+      if (gen === state.generation) {
+        if (state.failedSegments.size) showFailure();
+        else showStatus('Rewritten', 1200);
+      }
     } finally {
       state.draining = false;
       state.busy = false;
@@ -389,17 +554,39 @@
       const nodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
       if (!nodes.length) return;
       const chunks = chunkNodes(nodes, MAX_BATCH_CHARS, MAX_BATCH_ITEMS);
+      // A failed chunk no longer aborts the rest: it's marked failed (and
+      // retryable like any scroll-pipeline block) and the next one goes on —
+      // unless the error says retrying can't help, in which case the
+      // remaining chunks are marked failed without sending doomed requests.
+      let fatalErr = null;
+      let anyFailed = false;
       for (const batch of chunks) {
-        await processNodeBatch(batch, gen);
+        if (fatalErr) {
+          markNodesFailed(batch, fatalErr);
+          continue;
+        }
+        try {
+          const missing = await processNodeBatch(batch, gen);
+          if (gen !== state.generation) return;
+          if (missing.length) {
+            markNodesFailed(missing, partialResultError());
+            anyFailed = true;
+          }
+        } catch (err) {
+          if (gen !== state.generation) return;
+          markNodesFailed(batch, err);
+          anyFailed = true;
+          if (err?.retryable === false) fatalErr = err;
+        }
       }
+      // Active even if some parts failed — the page now has rewritten text
+      // and/or failure outlines that only restore() clears.
       if (!state.active) {
         state.active = true;
         notifyState();
       }
-      showStatus('Rewritten', 1500);
-    } catch (err) {
-      showStatus('Processing failed: ' + (err?.message || err), 4000, true);
-      throw err;
+      if (anyFailed) showFailure();
+      else showStatus('Rewritten', 1500);
     } finally {
       state.busy = false;
     }
@@ -486,11 +673,27 @@
       showStatus("Couldn't insert an explanation here: " + (err?.message || err), 3000, true);
       return;
     }
+    requestExplanation(gloss, range, text);
+  }
+
+  // On failure the placeholder stays put as a clickable "(failed · retry)"
+  // instead of vanishing, so retrying doesn't mean re-selecting the text.
+  async function requestExplanation(gloss, range, text) {
+    gloss.textContent = ' (……)';
+    gloss.classList.remove('ai-reader-gloss--failed');
+    gloss.classList.add('ai-reader-gloss--loading');
+    gloss.removeAttribute('title');
+    gloss.onclick = null;
     showStatus('Generating explanation…');
     try {
       const context = getExplainContext(range);
-      const res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_TEXT', text, context });
-      if (!res?.ok) throw new Error(res?.error || 'Explanation request failed');
+      let res;
+      try {
+        res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_TEXT', text, context });
+      } catch (err) {
+        throw messagingError(err);
+      }
+      if (!res?.ok) throw responseError(res, 'Explanation request failed');
       const explanation = (res.explanation || '').trim();
       if (!explanation) {
         removeGloss(gloss);
@@ -505,8 +708,23 @@
       }
       showStatus('Explanation added', 1200);
     } catch (err) {
-      removeGloss(gloss);
-      showStatus('Explanation failed: ' + (err?.message || err), 3000, true);
+      gloss.textContent = ' (failed · retry)';
+      gloss.classList.remove('ai-reader-gloss--loading');
+      gloss.classList.add('ai-reader-gloss--failed');
+      gloss.title = String(err?.message || err);
+      gloss.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        requestExplanation(gloss, range, text);
+      };
+      // The failed placeholder stays on the page, so mark it active the same
+      // as a successful gloss would — otherwise the popup has no way to
+      // restore() it away.
+      if (!state.active) {
+        state.active = true;
+        notifyState();
+      }
+      showStatus('Explanation failed · ' + failureReason(err), 3000, true);
     }
   }
 
@@ -554,6 +772,11 @@
       gloss.remove();
     }
     state.glossElements.clear();
+    for (const seg of state.failedSegments) seg.el.classList.remove('ai-reader-failed');
+    state.failedSegments.clear();
+    state.paused = false;
+    state.consecutiveFailures = 0;
+    state.lastError = null;
     state.active = false;
     state.busy = false;
     notifyState();
@@ -566,19 +789,40 @@
 
   let statusEl;
   let statusTimer;
-  function showStatus(text, timeout, isError) {
+  // `action` ({ label, onClick }) adds a button plus a close ×; such a toast
+  // stays up (pass no timeout) until acted on, dismissed, or replaced.
+  function showStatus(text, timeout, isError, action) {
     if (!statusEl) {
       statusEl = document.createElement('div');
       statusEl.className = 'ai-reader-status ai-reader-ignore';
       document.documentElement.appendChild(statusEl);
     }
     statusEl.textContent = text;
+    if (action) {
+      statusEl.append(
+        statusButton(action.label, 'ai-reader-status__action', action.onClick),
+        statusButton('×', 'ai-reader-status__close', () => statusEl.classList.remove('ai-reader-status--show'), 'Dismiss')
+      );
+    }
     statusEl.classList.toggle('ai-reader-status--error', !!isError);
     statusEl.classList.add('ai-reader-status--show');
     clearTimeout(statusTimer);
     if (timeout) {
       statusTimer = setTimeout(() => statusEl.classList.remove('ai-reader-status--show'), timeout);
     }
+  }
+
+  function statusButton(label, className, onClick, ariaLabel) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = label;
+    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      onClick();
+    });
+    return btn;
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -599,7 +843,12 @@
       return false;
     }
     if (message?.type === 'PING') {
-      sendResponse({ ok: true, active: state.active, busy: state.busy });
+      sendResponse({ ok: true, active: state.active, busy: state.busy, failed: failedBlockCount() });
+      return false;
+    }
+    if (message?.type === 'RETRY_FAILED') {
+      retryAllFailed();
+      sendResponse({ ok: true });
       return false;
     }
   });

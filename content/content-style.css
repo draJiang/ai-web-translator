@@ -24,6 +24,62 @@
   background: rgba(180, 30, 30, 0.9);
 }
 
+/* Retry / × on a failure toast. The toast itself stays click-through so it
+   never blocks the page under it; only its buttons take clicks, and only
+   while it's showing. `all: unset` first so the host page's own button
+   styles can't leak in. */
+.ai-reader-status__action,
+.ai-reader-status__close {
+  all: unset;
+  box-sizing: border-box;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font: inherit;
+  color: #fff;
+  cursor: pointer;
+}
+
+.ai-reader-status__action {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ai-reader-status__action:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ai-reader-status__close {
+  margin-left: 4px;
+  padding: 2px 4px;
+  opacity: 0.8;
+}
+
+.ai-reader-status__close:hover {
+  opacity: 1;
+}
+
+.ai-reader-status__action:focus-visible,
+.ai-reader-status__close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.ai-reader-status--show .ai-reader-status__action,
+.ai-reader-status--show .ai-reader-status__close {
+  pointer-events: auto;
+}
+
+/* A block whose rewrite failed: original text left untouched, marked with a
+   dashed outline (outline only, same reasoning as .ai-reader-loading below)
+   and clickable to retry just that block. Declared before .ai-reader-loading
+   so the loading outline wins while a retry is in flight. */
+.ai-reader-failed {
+  outline: 1.5px dashed rgba(200, 60, 60, 0.75);
+  outline-offset: 2px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
 /* Marks the block currently being sent to the AI. Deliberately never
    touches color/opacity/background of the text itself — only an outline
    drawn outside the content box — so the original characters stay exactly
@@ -84,4 +140,13 @@
     animation: none;
     opacity: 0.6;
   }
+}
+
+/* An Alt+select explanation whose request failed: the placeholder stays as
+   a clickable "(failed · retry)" instead of disappearing. Same inherited
+   color as any gloss — just a dotted underline to read as clickable. */
+.ai-reader-gloss--failed {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
