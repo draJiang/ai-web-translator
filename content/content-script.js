@@ -62,6 +62,7 @@
     paused: false, // set after a non-retryable error or too many failures in a row; drain() stays idle until Retry
     consecutiveFailures: 0,
     lastError: null, // most recent batch failure, for the reason shown on the failure toast
+    anyRewritten: false, // at least one text node on the page currently shows a rewrite
   };
 
   function isVisible(el) {
@@ -174,6 +175,7 @@
   // text node's characters — so it's replaced with a small wrapper element
   // containing plain text nodes plus a styled span for the gloss.
   function applyRewrite(node, rewritten) {
+    state.anyRewritten = true;
     // Checks for either tag, not just the opening one — a lone stray
     // "</ai-gloss>" (no matching open tag) must still go through sanitizing
     // below instead of leaking into nodeValue verbatim.
@@ -318,6 +320,7 @@
       if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
     }
     state.queue.unshift(...segs);
+    notifyState();
     // Retry could come while the queue was paused with nothing in flight,
     // or mid-drain — scheduleDrain() covers both.
     scheduleDrain(state.generation);
@@ -478,6 +481,7 @@
   async function drain(gen) {
     state.draining = true;
     state.busy = true;
+    notifyState();
     showStatus('Rewriting…');
     try {
       while (state.queue.length && gen === state.generation && !state.paused) {
@@ -518,6 +522,9 @@
             state.paused = true;
           }
         }
+        // The toolbar icon flips to "done" as soon as the first batch lands,
+        // not only once the whole queue has drained.
+        if (gen === state.generation) notifyState();
       }
       if (gen === state.generation) {
         if (state.failedSegments.size) showFailure();
@@ -526,6 +533,7 @@
     } finally {
       state.draining = false;
       state.busy = false;
+      if (gen === state.generation) notifyState();
     }
   }
 
@@ -549,6 +557,7 @@
     const range = sel.getRangeAt(0);
     const gen = state.generation;
     state.busy = true;
+    notifyState();
     showStatus('Rewriting…');
     try {
       const nodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
@@ -581,14 +590,12 @@
       }
       // Active even if some parts failed — the page now has rewritten text
       // and/or failure outlines that only restore() clears.
-      if (!state.active) {
-        state.active = true;
-        notifyState();
-      }
+      state.active = true;
       if (anyFailed) showFailure();
       else showStatus('Rewritten', 1500);
     } finally {
       state.busy = false;
+      if (gen === state.generation) notifyState();
     }
   }
 
@@ -702,10 +709,8 @@
       }
       gloss.textContent = ` (${explanation})`;
       gloss.classList.remove('ai-reader-gloss--loading');
-      if (!state.active) {
-        state.active = true;
-        notifyState();
-      }
+      state.active = true;
+      notifyState();
       showStatus('Explanation added', 1200);
     } catch (err) {
       gloss.textContent = ' (failed · retry)';
@@ -720,10 +725,8 @@
       // The failed placeholder stays on the page, so mark it active the same
       // as a successful gloss would — otherwise the popup has no way to
       // restore() it away.
-      if (!state.active) {
-        state.active = true;
-        notifyState();
-      }
+      state.active = true;
+      notifyState();
       showStatus('Explanation failed · ' + failureReason(err), 3000, true);
     }
   }
@@ -777,14 +780,31 @@
     state.paused = false;
     state.consecutiveFailures = 0;
     state.lastError = null;
+    state.anyRewritten = false;
     state.active = false;
     state.busy = false;
     notifyState();
     showStatus('Original text restored', 1200);
   }
 
+  // What the toolbar icon should show (see setTabIcon() in the background):
+  // turning rewrite mode on only means "working" — the ✓ waits until some
+  // text has actually been rewritten, so a page that's still loading, or
+  // whose first batch is still in flight, doesn't already look finished.
+  function iconState() {
+    if (!state.active && !state.busy) return 'off';
+    if (state.failedSegments.size && !state.busy) return 'failed';
+    if (state.anyRewritten || state.glossElements.size) return 'done';
+    return 'working';
+  }
+
+  let lastNotified = null;
   function notifyState() {
-    chrome.runtime.sendMessage({ type: 'STATE_CHANGED', active: state.active }).catch(() => {});
+    const icon = iconState();
+    const key = `${state.active}:${icon}`;
+    if (key === lastNotified) return;
+    lastNotified = key;
+    chrome.runtime.sendMessage({ type: 'STATE_CHANGED', active: state.active, icon }).catch(() => {});
   }
 
   let statusEl;
@@ -829,12 +849,12 @@
     if (message?.type === 'START_PROCESS') {
       if (message.mode === 'selection') {
         processSelection()
-          .then(() => sendResponse({ ok: true, active: state.active }))
+          .then(() => sendResponse({ ok: true, active: state.active, icon: iconState() }))
           .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
         return true;
       }
       startPage();
-      sendResponse({ ok: true, active: state.active });
+      sendResponse({ ok: true, active: state.active, icon: iconState() });
       return false;
     }
     if (message?.type === 'RESTORE') {

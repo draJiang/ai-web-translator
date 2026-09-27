@@ -70,7 +70,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'STATE_CHANGED') {
     const tabId = sender.tab?.id;
     if (tabId != null) {
-      setTabIcon(tabId, !!message.active);
+      setTabIcon(tabId, message.icon);
       setTabRemembered(tabId, !!message.active).catch(() => {});
     }
     return false;
@@ -95,7 +95,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A tab's B1 state is per-document: once it starts loading a new one, drop
   // back to the default icon so a stale checkmark doesn't linger.
   if (changeInfo.status === 'loading') {
-    setTabIcon(tabId, false);
+    setTabIcon(tabId, 'off');
     return;
   }
   // Once the new document has finished loading, re-trigger B1 mode if this
@@ -119,7 +119,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
         // did get processed. Set it here too, as the last, authoritative step
         // once we actually know the resulting state, so it always ends up
         // correct regardless of that race.
-        setTabIcon(tabId, !!res?.active);
+        setTabIcon(tabId, res?.icon);
       })
       .catch(() => {});
   }
@@ -129,8 +129,29 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   setTabRemembered(tabId, false).catch(() => {});
 });
 
-function setTabIcon(tabId, active) {
-  chrome.action.setIcon({ tabId, path: active ? ICONS_ACTIVE : ICONS_DEFAULT }).catch(() => {});
+// `state` comes from iconState() in the content script:
+//   off     — rewrite mode is off: plain icon
+//   working — on, but nothing has been rewritten yet (page still loading,
+//             first batch in flight): plain icon plus a "…" badge, so the ✓
+//             never shows before there's actually rewritten text
+//   done    — some text on the page is rewritten: ✓ icon
+//   failed  — some blocks failed and nothing is in flight: plain icon plus a
+//             red "!" badge (the ✓ sits where the badge draws, so not both)
+const ICON_STATES = {
+  off: { path: ICONS_DEFAULT, badge: '', title: '' },
+  working: { path: ICONS_DEFAULT, badge: '…', color: '#4b7774', title: 'Rewriting…' },
+  done: { path: ICONS_ACTIVE, badge: '', title: 'Rewrite mode on' },
+  failed: { path: ICONS_DEFAULT, badge: '!', color: '#dc2626', title: 'Some blocks failed to rewrite — open to retry' },
+};
+
+function setTabIcon(tabId, state) {
+  const s = ICON_STATES[state] || ICON_STATES.off;
+  const title = s.title ? `AI Web Reader — ${s.title}` : '';
+  chrome.action.setIcon({ tabId, path: s.path }).catch(() => {});
+  chrome.action.setBadgeText({ tabId, text: s.badge }).catch(() => {});
+  if (s.color) chrome.action.setBadgeBackgroundColor({ tabId, color: s.color }).catch(() => {});
+  // An empty per-tab title falls back to the manifest's default.
+  chrome.action.setTitle({ tabId, title }).catch(() => {});
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -138,7 +159,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'process-selection' || info.menuItemId === 'process-page') {
     const mode = info.menuItemId === 'process-selection' ? 'selection' : 'page';
     const res = await injectAndStart(tab.id, mode);
-    setTabIcon(tab.id, !!res?.active);
+    setTabIcon(tab.id, res?.icon);
   }
 });
 
