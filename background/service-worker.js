@@ -73,7 +73,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === 'EXPLAIN_TEXT') {
     getSettings()
-      .then((settings) => explainSelection(settings, message.text, message.context))
+      .then((settings) => explainSelection(settings, message.text, message.context, { level: message.level, previous: message.previous }))
       .then((explanation) => sendResponse({ ok: true, explanation }))
       .catch((err) => sendResponse(errorResponse(err)));
     return true;

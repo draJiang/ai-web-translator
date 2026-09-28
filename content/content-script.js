@@ -916,13 +916,17 @@
   }
 
   // The hover bar itself: one shared element, fixed-positioned next to
-  // whichever paragraph the pointer is over, appended to <html> like the
-  // status toast so it never changes the page's own layout or text.
-  const levelBar = { el: null, label: null, down: null, block: null, hideTimer: null, lastTarget: null };
+  // whichever paragraph the pointer is over — or above an Alt+select
+  // explanation, which has a level of its own (`gloss` set, `block` null) —
+  // appended to <html> like the status toast so it never changes the page's
+  // own layout or text.
+  const levelBar = { el: null, label: null, down: null, block: null, gloss: null, hideTimer: null, lastTarget: null };
   // How long the bar stays up after the pointer leaves the paragraph, so it
   // can cross the gap into the bar.
   const LEVEL_BAR_HIDE_DELAY_MS = 300;
   const LEVEL_BAR_GAP_PX = 6;
+  // Kept small so the pointer barely crosses the line above on its way up.
+  const LEVEL_BAR_GLOSS_GAP_PX = 2;
 
   function ensureLevelBar() {
     if (levelBar.el) return;
@@ -935,24 +939,42 @@
     levelBar.down.type = 'button';
     levelBar.down.className = 'ai-reader-levelbar__down';
     levelBar.down.textContent = '↓';
-    for (const [btn, onClick] of [
-      [levelBar.label, cycleBlockView],
-      [levelBar.down, simplifyBlock],
+    for (const [btn, onBlock, onGloss] of [
+      [levelBar.label, cycleBlockView, cycleExplanation],
+      [levelBar.down, simplifyBlock, simplifyExplanation],
     ]) {
       btn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (levelBar.block) onClick(levelBar.block);
+        if (levelBar.gloss) onGloss(levelBar.gloss);
+        else if (levelBar.block) onBlock(levelBar.block);
       });
     }
     el.append(levelBar.label, levelBar.down);
     el.addEventListener('mouseenter', () => clearTimeout(levelBar.hideTimer));
-    el.addEventListener('mouseleave', scheduleHideLevelBar);
+    el.addEventListener('mouseleave', () => scheduleHideLevelBar());
     document.documentElement.appendChild(el);
     levelBar.el = el;
   }
 
+  function updateGlossLevelBar() {
+    const info = explanations.get(levelBar.gloss);
+    const levels = loadedExplanationLevels(info);
+    levelBar.label.textContent = info.level;
+    levelBar.label.disabled = info.busy || levels.length < 2;
+    levelBar.label.title = `Reading level of this explanation — click to switch (${levels.join(' → ')})`;
+    const next = simplerExplanationLevel(info);
+    levelBar.down.disabled = info.busy || !next;
+    levelBar.down.title = info.busy ? 'Rewriting…' : next ? `Make this explanation simpler (${next})` : 'Already at the simplest level';
+    levelBar.down.setAttribute('aria-label', levelBar.down.title);
+    levelBar.el.classList.toggle('ai-reader-levelbar--busy', info.busy);
+  }
+
   function updateLevelBar() {
+    if (levelBar.gloss && levelBar.el) {
+      updateGlossLevelBar();
+      return;
+    }
     const block = levelBar.block;
     if (!block || !levelBar.el) return;
     const view = blockView(block);
@@ -971,14 +993,28 @@
 
   function positionLevelBar() {
     const block = levelBar.block;
-    if (!block || !levelBar.el) return;
-    if (!block.isConnected) {
+    const anchor = levelBar.gloss || block;
+    if (!anchor || !levelBar.el) return;
+    if (!anchor.isConnected) {
       hideLevelBar();
       return;
     }
-    const rect = block.getBoundingClientRect();
     const barWidth = levelBar.el.offsetWidth;
     const barHeight = levelBar.el.offsetHeight;
+    if (levelBar.gloss) {
+      // Just above where the explanation starts (it may wrap onto several
+      // lines), or just below where it ends when there's no room above.
+      const rects = levelBar.gloss.getClientRects();
+      if (!rects.length) return;
+      const first = rects[0];
+      let top = first.top - barHeight - LEVEL_BAR_GLOSS_GAP_PX;
+      if (top < 4) top = rects[rects.length - 1].bottom + LEVEL_BAR_GLOSS_GAP_PX;
+      const left = Math.max(2, Math.min(first.left, window.innerWidth - barWidth - 2));
+      levelBar.el.style.left = `${left}px`;
+      levelBar.el.style.top = `${top}px`;
+      return;
+    }
+    const rect = block.getBoundingClientRect();
     // Left margin when there's room, otherwise pinned to the window's left
     // edge; vertically at the paragraph's top, kept on screen while a tall
     // paragraph scrolls past.
@@ -988,10 +1024,11 @@
     levelBar.el.style.top = `${top}px`;
   }
 
-  function showLevelBar(block) {
+  function showLevelBar(block, gloss = null) {
     ensureLevelBar();
     clearTimeout(levelBar.hideTimer);
-    levelBar.block = block;
+    levelBar.block = gloss ? null : block;
+    levelBar.gloss = gloss;
     updateLevelBar();
     positionLevelBar();
     levelBar.el.classList.add('ai-reader-levelbar--show');
@@ -1000,13 +1037,30 @@
   function hideLevelBar() {
     clearTimeout(levelBar.hideTimer);
     levelBar.block = null;
+    levelBar.gloss = null;
     levelBar.lastTarget = null;
     levelBar.el?.classList.remove('ai-reader-levelbar--show');
   }
 
-  function scheduleHideLevelBar() {
+  // `next`, when given, is what the pointer moved onto: once the bar hides,
+  // that element's paragraph gets its bar instead.
+  function scheduleHideLevelBar(next = null) {
     clearTimeout(levelBar.hideTimer);
-    levelBar.hideTimer = setTimeout(hideLevelBar, LEVEL_BAR_HIDE_DELAY_MS);
+    levelBar.hideTimer = setTimeout(() => {
+      hideLevelBar();
+      if (next?.isConnected) showLevelBarFor(next);
+    }, LEVEL_BAR_HIDE_DELAY_MS);
+  }
+
+  function showLevelBarFor(target) {
+    const gloss = target.closest('.ai-reader-gloss');
+    if (gloss && explanations.get(gloss)?.level) {
+      showLevelBar(null, gloss);
+      return;
+    }
+    const block = blockOf(target);
+    if (block && state.blockUnits.get(block)?.size) showLevelBar(block);
+    else scheduleHideLevelBar();
   }
 
   document.addEventListener('mouseover', (event) => {
@@ -1021,9 +1075,11 @@
     }
     levelBar.lastTarget = target;
     if (target.closest('.ai-reader-status')) return;
-    const block = blockOf(target);
-    if (block && state.blockUnits.get(block)?.size) showLevelBar(block);
-    else scheduleHideLevelBar();
+    // An explanation's bar sits above it, over the paragraph's text: moving
+    // up to it gets the same grace period as leaving the bar, rather than
+    // the paragraph's own bar taking its place at once.
+    if (levelBar.gloss && !target.closest('.ai-reader-gloss')) scheduleHideLevelBar(target);
+    else showLevelBarFor(target);
   });
 
   document.addEventListener('mouseout', (event) => {
@@ -1041,6 +1097,10 @@
   // necessarily inserts new content (the explanation has to go somewhere) —
   // expected here since the reader explicitly asked for an annotation, same
   // as the in-line <ai-gloss> case in applyRewrite().
+
+  // Alt+select gloss element -> { text, context, level (shown, null until
+  // the first explanation arrives), results: level -> explanation, busy }.
+  const explanations = new WeakMap();
 
   function getExplainContext(range) {
     const container = range.commonAncestorContainer;
@@ -1096,6 +1156,7 @@
   function removeGloss(gloss) {
     state.glossElements.delete(gloss);
     gloss.remove();
+    if (levelBar.gloss === gloss) hideLevelBar();
   }
 
   async function explainRange(range, text) {
@@ -1103,6 +1164,8 @@
       showStatus('Selection is too long — choose a single word or sentence', 2500, true);
       return;
     }
+    // Read before the placeholder goes in, so it isn't part of the context.
+    const context = getExplainContext(range);
     // "ethnicity" -> "ethnicity(……)" while the request is in flight, so the
     // loading state sits right next to the word it's about instead of
     // outlining the whole surrounding paragraph.
@@ -1114,12 +1177,33 @@
       showStatus("Couldn't insert an explanation here: " + (err?.message || err), 3000, true);
       return;
     }
-    requestExplanation(gloss, range, text);
+    explanations.set(gloss, { text, context, level: null, results: new Map(), busy: false });
+    requestExplanation(gloss);
+  }
+
+  // Throws if the request failed; returns '' when the model had nothing to
+  // explain at that level.
+  async function fetchExplanation(info, level, previous) {
+    let res;
+    try {
+      res = await chrome.runtime.sendMessage({
+        type: 'EXPLAIN_TEXT',
+        text: info.text,
+        context: info.context,
+        level,
+        previous,
+      });
+    } catch (err) {
+      throw messagingError(err);
+    }
+    if (!res?.ok) throw responseError(res, 'Explanation request failed');
+    return (res.explanation || '').trim();
   }
 
   // On failure the placeholder stays put as a clickable "(failed · retry)"
   // instead of vanishing, so retrying doesn't mean re-selecting the text.
-  async function requestExplanation(gloss, range, text) {
+  async function requestExplanation(gloss) {
+    const info = explanations.get(gloss);
     gloss.textContent = ' (……)';
     gloss.classList.remove('ai-reader-gloss--failed');
     gloss.classList.add('ai-reader-gloss--loading');
@@ -1127,26 +1211,25 @@
     gloss.onclick = null;
     showStatus('Generating explanation…');
     try {
-      const context = getExplainContext(range);
-      let res;
-      try {
-        res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_TEXT', text, context });
-      } catch (err) {
-        throw messagingError(err);
-      }
-      if (!res?.ok) throw responseError(res, 'Explanation request failed');
-      const explanation = (res.explanation || '').trim();
+      // The first explanation is at the reader's target level, the same one
+      // the page rewrite uses; ↓ on the hover bar steps it down from there.
+      if (!state.active) await loadLevels();
+      const level = state.pageLevel;
+      const explanation = await fetchExplanation(info, level);
+      if (!gloss.isConnected) return; // restored or re-rendered away meanwhile
       if (!explanation) {
         removeGloss(gloss);
         showStatus("Couldn't generate an explanation for the selection", 2000, true);
         return;
       }
-      gloss.textContent = ` (${explanation})`;
+      info.results.set(level, explanation);
+      showExplanation(gloss, level);
       gloss.classList.remove('ai-reader-gloss--loading');
       state.active = true;
       notifyState();
       showStatus('Explanation added', 1200);
     } catch (err) {
+      if (!gloss.isConnected) return;
       gloss.textContent = ' (failed · retry)';
       gloss.classList.remove('ai-reader-gloss--loading');
       gloss.classList.add('ai-reader-gloss--failed');
@@ -1154,7 +1237,7 @@
       gloss.onclick = (event) => {
         event.preventDefault();
         event.stopPropagation();
-        requestExplanation(gloss, range, text);
+        requestExplanation(gloss);
       };
       // The failed placeholder stays on the page, so mark it active the same
       // as a successful gloss would — otherwise the popup has no way to
@@ -1162,6 +1245,72 @@
       state.active = true;
       notifyState();
       showStatus('Explanation failed · ' + failureReason(err), 3000, true);
+    }
+  }
+
+  // Per-explanation reading level, like a paragraph's: hovering a finished
+  // explanation shows the same level bar, whose ↓ asks for it again one
+  // level lower and whose label switches between the levels already loaded.
+  // A simpler version is written from the selected text, like the first one,
+  // with the current explanation passed along only as the one that was too
+  // hard — so it's a new explanation, not a rewrite of a rewrite.
+
+  function showExplanation(gloss, level) {
+    const info = explanations.get(gloss);
+    info.level = level;
+    gloss.textContent = ` (${info.results.get(level)})`;
+    if (levelBar.gloss === gloss) {
+      updateLevelBar();
+      positionLevelBar();
+    }
+  }
+
+  function simplerExplanationLevel(info) {
+    const i = state.levels.indexOf(info.level);
+    return i > 0 ? state.levels[i - 1] : null;
+  }
+
+  // Easiest first, like a paragraph's views; there's no "original" here —
+  // the selected text itself is the original.
+  function loadedExplanationLevels(info) {
+    return state.levels.filter((level) => info.results.has(level));
+  }
+
+  function cycleExplanation(gloss) {
+    const info = explanations.get(gloss);
+    const levels = loadedExplanationLevels(info);
+    if (info.busy || levels.length < 2) return;
+    showExplanation(gloss, levels[(levels.indexOf(info.level) + 1) % levels.length]);
+  }
+
+  async function simplifyExplanation(gloss) {
+    const info = explanations.get(gloss);
+    const target = simplerExplanationLevel(info);
+    if (!target || info.busy) return;
+    if (info.results.has(target)) {
+      showExplanation(gloss, target);
+      return;
+    }
+    info.busy = true;
+    gloss.classList.add('ai-reader-gloss--loading');
+    if (levelBar.gloss === gloss) updateLevelBar();
+    showStatus(`Rewriting this explanation at ${target}…`);
+    try {
+      const explanation = await fetchExplanation(info, target, info.results.get(info.level));
+      if (!gloss.isConnected) return;
+      if (!explanation) {
+        showStatus(`Couldn't explain this at ${target}`, 2500, true);
+        return;
+      }
+      info.results.set(target, explanation);
+      showExplanation(gloss, target);
+      showStatus(`Explanation rewritten at ${target}`, 1200);
+    } catch (err) {
+      if (gloss.isConnected) showStatus(`Couldn't simplify this explanation · ${failureReason(err)}`, 3000, true);
+    } finally {
+      info.busy = false;
+      gloss.classList.remove('ai-reader-gloss--loading');
+      if (levelBar.gloss === gloss) updateLevelBar();
     }
   }
 
