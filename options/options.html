@@ -34,6 +34,16 @@
           <input type="text" id="model" placeholder="e.g. gpt-4o-mini / claude-haiku-4-5 / gemma4:31b" />
         </label>
 
+        <label class="field">
+          <span>Target Reading Level</span>
+          <select id="targetLevel">
+            <option value="B2">B2 — upper intermediate</option>
+            <option value="B1">B1 — intermediate (default)</option>
+            <option value="A2">A2 — elementary</option>
+            <option value="A1">A1 — beginner</option>
+          </select>
+        </label>
+
         <div class="field">
           <div class="field-header">
             <span>Rewrite Prompt (system prompt)</span>
@@ -52,7 +62,8 @@
       <section class="hint">
         <h2>Notes</h2>
         <ul>
-          <li>The rewrite prompt above is fully editable — the built-in prompt turns page text in any language into <strong>CEFR B1</strong>-level English (English text is simplified, other languages are translated), keeping the original meaning, shortening long sentences, and replacing rare words, with short English glosses added for any hard words that remain, but you can replace it with your own (a different level, a different target language, a different rewrite style). It must still ask the model to return a JSON array of strings with exactly as many items as the input, in order — otherwise the extension won't be able to parse the response. Use "Reset to default" to restore the built-in prompt.</li>
+          <li><strong>Target Reading Level</strong> is the CEFR level a page is rewritten to when you turn rewrite mode on. If a paragraph is still too hard, hover it and click the small <strong>↓</strong> button in its left margin to rewrite just that paragraph one level lower (B1 → A2 → A1); click the level label next to it to switch that paragraph between the levels you've already loaded and the original text. A level change here applies the next time you turn rewrite mode on for a page.</li>
+          <li>The rewrite prompt above is fully editable — the built-in prompt (shown for the level selected above) turns page text in any language into English at that CEFR level (English text is simplified, other languages are translated), keeping the original meaning, shortening long sentences, and replacing rare words, with short English glosses added for any hard words that remain, but you can replace it with your own (a different target language, a different rewrite style). It must still ask the model to return a JSON array of strings with exactly as many items as the input, in order — otherwise the extension won't be able to parse the response. Write <code>{{level}}</code> anywhere in a custom prompt to have it replaced with the level being requested; a custom prompt without <code>{{level}}</code> is used as-is for the page, and the per-paragraph ↓ button falls back to the built-in prompt. Use "Reset to default" to restore the built-in prompt.</li>
           <li><strong>OpenAI</strong>: calls <code>api.openai.com/v1/chat/completions</code>, requires an OpenAI API key.</li>
           <li><strong>Anthropic Claude</strong>: calls <code>api.anthropic.com/v1/messages</code>, requires an Anthropic API key.</li>
           <li><strong>Ollama</strong>: connects to Ollama Cloud by default (<code>https://ollama.com</code>) — enter your Ollama API key; for local Ollama, change Base URL to <code>http://localhost:11434</code>, which usually needs no API key.</li>

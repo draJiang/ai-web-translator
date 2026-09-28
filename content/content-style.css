@@ -125,6 +125,96 @@
   }
 }
 
+/* A paragraph shown at a level the reader picked for it (or switched back to
+   the original), rather than the page's own level: a thin theme-colored bar
+   just outside its left edge. A box-shadow with a negative spread paints
+   only that sliver outside the box — a paint layer like the outlines above,
+   so nothing in the layout moves. */
+.ai-reader-leveled {
+  box-shadow: -4px 0 0 -1px rgba(75, 119, 116, 0.7) !important;
+}
+
+/* The per-paragraph level bar shown in a hovered paragraph's left margin
+   (see showLevelBar() in content-script.js): the paragraph's level label
+   (click to switch versions) and a ↓ "simpler" button. Same dark,
+   theme-independent look as the status toast; appended to <html> and
+   fixed-positioned, so it never takes part in the page's layout. */
+.ai-reader-levelbar {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.82);
+  font-size: 11px;
+  line-height: 1;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.ai-reader-levelbar--show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* `all: unset` first so the host page's own button styles can't leak in. */
+.ai-reader-levelbar__label,
+.ai-reader-levelbar__down {
+  all: unset;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font: inherit;
+  color: #fff;
+  cursor: pointer;
+  text-align: center;
+}
+
+.ai-reader-levelbar__label {
+  min-width: 22px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ai-reader-levelbar__down {
+  background: rgba(75, 119, 116, 0.9);
+}
+
+.ai-reader-levelbar__label:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ai-reader-levelbar__down:hover:not(:disabled) {
+  background: rgba(75, 119, 116, 1);
+}
+
+.ai-reader-levelbar__label:disabled,
+.ai-reader-levelbar__down:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.ai-reader-levelbar__label:focus-visible,
+.ai-reader-levelbar__down:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+/* While that paragraph's "simpler" request is in flight. */
+.ai-reader-levelbar--busy .ai-reader-levelbar__down {
+  animation: ai-reader-gloss-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-reader-levelbar--busy .ai-reader-levelbar__down {
+    animation: none;
+  }
+}
+
 /* Explanation appended by Alt+select, or wrapped from an in-line
    <ai-gloss> tag in a B1 rewrite (see applyRewrite() in content-script.js).
    Inherits the surrounding text's own color (never overridden) so it always

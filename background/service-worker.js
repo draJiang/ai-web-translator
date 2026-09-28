@@ -1,5 +1,6 @@
 import { getSettings } from '../lib/storage.js';
 import { processBatch, explainSelection } from '../lib/providers.js';
+import { LEVELS, normalizeLevel } from '../lib/prompts.js';
 
 // chrome.action.setIcon's `path` option must be resolved via chrome.runtime.getURL()
 // here — plain relative strings like 'icons/icon16.png' resolve against this script's
@@ -54,11 +55,21 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'PROCESS_BATCH') {
+    const { level, explicitLevel, context } = message;
     getSettings()
-      .then((settings) => processBatch(settings, message.texts))
+      .then((settings) => processBatch(settings, message.texts, { level, explicitLevel, context }))
       .then((result) => sendResponse({ ok: true, results: result }))
       .catch((err) => sendResponse(errorResponse(err)));
     return true; // keep the message channel open for the async response
+  }
+  // The content script isn't a module and can't import lib/prompts.js, so it
+  // asks here for the level ladder and the user's target level when rewrite
+  // mode starts.
+  if (message?.type === 'GET_LEVELS') {
+    getSettings()
+      .then((settings) => sendResponse({ ok: true, levels: LEVELS, targetLevel: normalizeLevel(settings.targetLevel) }))
+      .catch((err) => sendResponse(errorResponse(err)));
+    return true;
   }
   if (message?.type === 'EXPLAIN_TEXT') {
     getSettings()

@@ -1,12 +1,13 @@
 import { getSettings, saveSettings } from '../lib/storage.js';
 import { processBatch } from '../lib/providers.js';
-import { B1_SYSTEM_PROMPT } from '../lib/prompts.js';
+import { buildRewritePrompt, isBuiltInPrompt, normalizeLevel } from '../lib/prompts.js';
 
 const form = document.getElementById('settingsForm');
 const providerEl = document.getElementById('provider');
 const apiKeyEl = document.getElementById('apiKey');
 const baseUrlEl = document.getElementById('baseUrl');
 const modelEl = document.getElementById('model');
+const targetLevelEl = document.getElementById('targetLevel');
 const rewritePromptEl = document.getElementById('rewritePrompt');
 const resetPromptBtn = document.getElementById('resetPromptBtn');
 const resultEl = document.getElementById('result');
@@ -28,13 +29,36 @@ async function init() {
   apiKeyEl.value = settings.apiKey || '';
   baseUrlEl.value = settings.baseUrl || '';
   modelEl.value = settings.model || '';
-  rewritePromptEl.value = settings.rewritePrompt || B1_SYSTEM_PROMPT;
+  targetLevelEl.value = normalizeLevel(settings.targetLevel);
+  // A saved copy of a built-in prompt (older versions saved the box's
+  // contents even when left at the default) is shown as the built-in prompt
+  // for the selected level, not as a custom prompt frozen at B1.
+  rewritePromptEl.value =
+    settings.rewritePrompt && !isBuiltInPrompt(settings.rewritePrompt)
+      ? settings.rewritePrompt
+      : buildRewritePrompt(targetLevelEl.value);
   updateFieldVisibility();
 }
 
 resetPromptBtn.addEventListener('click', () => {
-  rewritePromptEl.value = B1_SYSTEM_PROMPT;
+  rewritePromptEl.value = buildRewritePrompt(targetLevelEl.value);
 });
+
+// The box shows the built-in prompt for the selected level, so follow a
+// level change — unless it holds a custom prompt, which is left alone.
+targetLevelEl.addEventListener('change', () => {
+  if (!rewritePromptEl.value.trim() || isBuiltInPrompt(rewritePromptEl.value)) {
+    rewritePromptEl.value = buildRewritePrompt(targetLevelEl.value);
+  }
+});
+
+// Empty means "use the built-in prompt for whatever level is requested"; a
+// box left at a built-in prompt is saved that way, so the target level and
+// the per-paragraph "simpler" button keep working.
+function customPromptValue() {
+  const value = rewritePromptEl.value.trim();
+  return isBuiltInPrompt(value) ? '' : value;
+}
 
 providerEl.addEventListener('change', () => {
   const def = PROVIDER_DEFAULTS[providerEl.value];
@@ -72,7 +96,8 @@ async function persist() {
     apiKey: apiKeyEl.value.trim(),
     baseUrl,
     model: modelEl.value.trim(),
-    rewritePrompt: rewritePromptEl.value.trim(),
+    rewritePrompt: customPromptValue(),
+    targetLevel: targetLevelEl.value,
   });
   showResult('Saved', false);
 }
@@ -105,7 +130,8 @@ testBtn.addEventListener('click', async () => {
       apiKey: apiKeyEl.value.trim(),
       baseUrl,
       model: modelEl.value.trim(),
-      rewritePrompt: rewritePromptEl.value.trim(),
+      rewritePrompt: customPromptValue(),
+      targetLevel: targetLevelEl.value,
     };
     const [rewritten] = await processBatch(settings, [
       'The implementation of the new policy was met with considerable reluctance from employees.',

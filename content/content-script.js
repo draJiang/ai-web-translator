@@ -42,12 +42,36 @@
   const GLOSS_TAG_RE = /<ai-gloss>([\s\S]*?)<\/ai-gloss>/g;
   const STRAY_GLOSS_TAG_RE = /<\/?ai-gloss>/g;
 
+  // What a paragraph ("block") currently shows — its "view":
+  //   '~B1'      the page's own target level (the default for every block)
+  //   'A2'       an explicit level the reader picked for just this block
+  //              with the "simpler" button
+  //   'original' the untouched original text
+  // A view is also the first half of a rewriteCache key (see cacheKey()):
+  // the page-level and explicit variants are kept apart because a custom
+  // prompt without {{level}} makes them different requests (see
+  // resolveRewritePrompt() in lib/prompts.js).
+  const ORIGINAL_VIEW = 'original';
+  const PAGE_VIEW_PREFIX = '~';
+  // Longest paragraph text sent along as context with a "simpler" request.
+  const BLOCK_CONTEXT_MAX_CHARS = 2000;
+  // A "simpler" request re-checks for fragments still without a result
+  // (partial AI responses, or fragments of the paragraph the scroll pipeline
+  // registered while the request was in flight) this many times in all.
+  const SIMPLIFY_MAX_ROUNDS = 3;
+
   const state = {
     active: false, // true once the user has turned B1 mode on for this page
     busy: false, // a batch request is currently in flight
     generation: 0, // bumped on every start/restore so stale async results are dropped
+    levels: ['A1', 'A2', 'B1', 'B2'], // reading levels, easiest first — replaced by LEVELS from lib/prompts.js via GET_LEVELS
+    pageLevel: 'B1', // the user's target level, read when rewrite mode starts
     originalMap: new Map(), // text node -> original text
-    rewriteCache: new Map(), // original text -> rewritten text, survives restore() so turning rewrite mode back on doesn't re-call the API for text seen before
+    rewriteCache: new Map(), // view + original text (see cacheKey()) -> rewritten text, survives restore() so turning rewrite mode back on doesn't re-call the API for text seen before
+    unitBlock: new WeakMap(), // text node in originalMap -> the paragraph element it belongs to (see blockOf())
+    blockUnits: new WeakMap(), // paragraph element -> Set of its text nodes in originalMap
+    blockViews: new Map(), // paragraph element -> its view, only for paragraphs not at the page's level; survives restore() so they come back at the level the reader picked
+    blockBusy: new Set(), // paragraphs with a "simpler" request in flight
     trackedNodes: new WeakSet(), // nodes already scheduled at least once (processed or pending)
     observer: null,
     elToSegments: null, // Element -> segment[] awaiting that element's visibility
@@ -113,22 +137,71 @@
     return segments;
   }
 
-  function chunkNodes(nodes, maxChars, maxItems) {
+  function chunkItems(items, lengthOf, maxChars, maxItems) {
     const chunks = [];
     let cur = [];
     let curChars = 0;
-    for (const node of nodes) {
-      const len = node.nodeValue.length;
+    for (const item of items) {
+      const len = lengthOf(item);
       if (cur.length && (curChars + len > maxChars || cur.length >= maxItems)) {
         chunks.push(cur);
         cur = [];
         curChars = 0;
       }
-      cur.push(node);
+      cur.push(item);
       curChars += len;
     }
     if (cur.length) chunks.push(cur);
     return chunks;
+  }
+
+  // The paragraph a text node belongs to, for the per-paragraph level
+  // controls: its nearest ancestor that isn't laid out inline, so text split
+  // across <a>/<b>/<span> still counts as one paragraph.
+  function blockOf(el) {
+    let cur = el;
+    while (cur && cur !== document.body && cur !== document.documentElement) {
+      const display = window.getComputedStyle(cur).display;
+      if (display && display !== 'contents' && !display.startsWith('inline')) return cur;
+      cur = cur.parentElement;
+    }
+    return cur;
+  }
+
+  function pageView() {
+    return PAGE_VIEW_PREFIX + state.pageLevel;
+  }
+
+  function viewLevel(view) {
+    return view.startsWith(PAGE_VIEW_PREFIX) ? view.slice(PAGE_VIEW_PREFIX.length) : view;
+  }
+
+  function blockView(block) {
+    return state.blockViews.get(block) || pageView();
+  }
+
+  function unitView(node) {
+    const block = state.unitBlock.get(node);
+    return (block && state.blockViews.get(block)) || pageView();
+  }
+
+  function cacheKey(view, text) {
+    return `${view}\u0000${text}`;
+  }
+
+  // Records a text node's original text (for restore()) and which paragraph
+  // it belongs to. Done before its rewrite is requested, not after, so a
+  // "simpler" click on the paragraph while the request is in flight already
+  // covers it.
+  function registerUnit(node) {
+    if (state.originalMap.has(node)) return;
+    state.originalMap.set(node, node.nodeValue);
+    const block = blockOf(node.parentElement);
+    if (!block) return;
+    state.unitBlock.set(node, block);
+    let units = state.blockUnits.get(block);
+    if (!units) state.blockUnits.set(block, (units = new Set()));
+    units.add(node);
   }
 
   // Builds the plain-text-plus-gloss-spans replacement for a rewritten
@@ -199,6 +272,58 @@
     state.rewriteWrappers.set(node, wrapper);
   }
 
+  // Shows `text` in place of a registered text node — or its original text
+  // when `text` is null. Unlike applyRewrite() alone, this can be called
+  // again on a node that's already showing a rewrite (a paragraph switching
+  // level), including one applyRewrite() swapped out for a gloss wrapper:
+  // the original node goes back in the wrapper's place first.
+  function renderUnit(node, text) {
+    const wrapper = state.rewriteWrappers.get(node);
+    if (wrapper) {
+      state.rewriteWrappers.delete(node);
+      if (!wrapper.parentNode) return; // the page itself removed it meanwhile
+      wrapper.replaceWith(node);
+    }
+    if (text == null) node.nodeValue = state.originalMap.get(node);
+    else applyRewrite(node, text);
+  }
+
+  // Every rewrite request — the scroll pipeline's batches and a paragraph's
+  // "simpler" requests — goes through this one queue, so the AI provider
+  // still only ever sees one request at a time.
+  let requestChain = Promise.resolve();
+  function withRequestSlot(fn) {
+    const run = requestChain.then(fn);
+    requestChain = run.catch(() => {});
+    return run;
+  }
+
+  // Asks for `texts` rewritten for `view` and caches whatever comes back.
+  // Throws if the request as a whole failed; items the background couldn't
+  // salvage from a malformed response are simply left uncached.
+  async function fetchRewrites(view, texts, context) {
+    let res;
+    try {
+      res = await withRequestSlot(() =>
+        chrome.runtime.sendMessage({
+          type: 'PROCESS_BATCH',
+          texts,
+          level: viewLevel(view),
+          explicitLevel: !view.startsWith(PAGE_VIEW_PREFIX),
+          context,
+        })
+      );
+    } catch (err) {
+      throw messagingError(err);
+    }
+    if (!res?.ok) throw responseError(res, 'Processing request failed');
+    res.results.forEach((rewritten, i) => {
+      if (typeof rewritten === 'string' && rewritten.length) {
+        state.rewriteCache.set(cacheKey(view, texts[i]), rewritten);
+      }
+    });
+  }
+
   // Returns the nodes that came back without a rewrite (the background could
   // only salvage part of a malformed AI response — see processBatch() in
   // lib/providers.js) so the caller can mark just those as failed. Throws if
@@ -211,37 +336,50 @@
     const els = new Set(nodes.map((n) => n.parentElement).filter(Boolean));
     for (const el of els) el.classList.add('ai-reader-loading');
     try {
-      // A node's rewrite depends only on its own text (see PROCESS_BATCH in
-      // the background worker — each text is rewritten independently), so a
-      // cache keyed on the original string is valid across restore()/re-run
-      // cycles, not just within one. Only texts we haven't rewritten before
-      // go to the API.
-      const toFetchTexts = [];
+      for (const node of nodes) registerUnit(node);
+      // A node's rewrite depends only on its own text and the level it's
+      // rewritten to (see PROCESS_BATCH in the background worker — each text
+      // is rewritten independently), so a cache keyed on those is valid
+      // across restore()/re-run cycles, not just within one. Only texts we
+      // haven't rewritten for that view before go to the API — one request
+      // per view, since a paragraph the reader made simpler keeps its own
+      // level for fragments of it that load later.
+      const toFetch = new Map(); // view -> texts
+      const requested = new Set(); // cache keys asked for below
       for (const node of nodes) {
-        const text = node.nodeValue;
-        if (!state.rewriteCache.has(text) && !toFetchTexts.includes(text)) toFetchTexts.push(text);
+        const view = unitView(node);
+        if (view === ORIGINAL_VIEW) continue;
+        const text = state.originalMap.get(node);
+        const key = cacheKey(view, text);
+        if (state.rewriteCache.has(key) || requested.has(key)) continue;
+        requested.add(key);
+        if (!toFetch.has(view)) toFetch.set(view, []);
+        toFetch.get(view).push(text);
       }
-      if (toFetchTexts.length) {
-        let res;
+      for (const [view, texts] of toFetch) {
         try {
-          res = await chrome.runtime.sendMessage({ type: 'PROCESS_BATCH', texts: toFetchTexts });
+          await fetchRewrites(view, texts);
         } catch (err) {
-          throw messagingError(err);
+          if (gen !== state.generation) return [];
+          throw err;
         }
         if (gen !== state.generation) return []; // superseded by a restore/new run — discard
-        if (!res?.ok) throw responseError(res, 'Processing request failed');
-        res.results.forEach((rewritten, i) => {
-          if (typeof rewritten === 'string' && rewritten.length) {
-            state.rewriteCache.set(toFetchTexts[i], rewritten);
-          }
-        });
       }
       const missing = [];
       for (const node of nodes) {
-        if (!state.originalMap.has(node)) state.originalMap.set(node, node.nodeValue);
-        const rewritten = state.rewriteCache.get(node.nodeValue);
-        if (rewritten) applyRewrite(node, rewritten);
-        else missing.push(node);
+        // Looked up again, not reused from above: the reader may have
+        // switched this paragraph's level while the request was in flight.
+        // That switch renders the paragraph itself, so a node whose view
+        // changed to one this batch didn't ask for is left alone here
+        // rather than reported as failed.
+        const view = unitView(node);
+        if (view === ORIGINAL_VIEW) continue;
+        const key = cacheKey(view, state.originalMap.get(node));
+        const rewritten = state.rewriteCache.get(key);
+        if (rewritten) renderUnit(node, rewritten);
+        else if (requested.has(key)) missing.push(node);
+        const block = state.unitBlock.get(node);
+        if (block && state.blockViews.has(block)) block.classList.add('ai-reader-leveled');
       }
       return missing;
     } finally {
@@ -537,7 +675,23 @@
     }
   }
 
-  function startPage() {
+  // The level ladder and the user's target level live in the extension's
+  // settings; read them fresh each time rewrite mode starts, so a level
+  // changed in the settings applies from the next start on. Falls back to
+  // the defaults in `state` if the background can't be reached.
+  async function loadLevels() {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_LEVELS' });
+      if (res?.ok && Array.isArray(res.levels) && res.levels.includes(res.targetLevel)) {
+        state.levels = res.levels;
+        state.pageLevel = res.targetLevel;
+      }
+    } catch {
+      // keep the current levels
+    }
+  }
+
+  async function startPage() {
     if (state.active) return;
     state.generation += 1;
     const gen = state.generation;
@@ -545,6 +699,8 @@
     state.busy = false;
     notifyState();
     showStatus('Rewrite mode on — processing visible content…');
+    await loadLevels();
+    if (gen !== state.generation) return; // restored before the level arrived
     scanAndObserve(gen);
     startNavWatcher(gen);
   }
@@ -560,9 +716,11 @@
     notifyState();
     showStatus('Rewriting…');
     try {
+      if (!state.active) await loadLevels();
+      if (gen !== state.generation) return;
       const nodes = collectTextNodes(document.body).filter((n) => range.intersectsNode(n));
       if (!nodes.length) return;
-      const chunks = chunkNodes(nodes, MAX_BATCH_CHARS, MAX_BATCH_ITEMS);
+      const chunks = chunkItems(nodes, (n) => n.nodeValue.length, MAX_BATCH_CHARS, MAX_BATCH_ITEMS);
       // A failed chunk no longer aborts the rest: it's marked failed (and
       // retryable like any scroll-pipeline block) and the next one goes on —
       // unless the error says retrying can't help, in which case the
@@ -598,6 +756,274 @@
       if (gen === state.generation) notifyState();
     }
   }
+
+  // --- Per-paragraph reading level ----------------------------------------
+  //
+  // Hovering a rewritten paragraph shows a small bar in its left margin: a
+  // label with the level the paragraph is shown at (click it to switch
+  // between the versions already loaded and the original), and a ↓ button
+  // that rewrites just that paragraph one level lower. A paragraph not at
+  // the page's own level also gets a thin bar down its left edge.
+  //
+  // A lower level is always rewritten from the original text, never from
+  // the already-simplified version, so meaning doesn't drift a bit more with
+  // every step down.
+
+  function simplerView(block) {
+    const view = blockView(block);
+    if (view === ORIGINAL_VIEW) return pageView();
+    const i = state.levels.indexOf(viewLevel(view));
+    return i > 0 ? state.levels[i - 1] : null;
+  }
+
+  function isViewLoaded(view, units) {
+    if (view === ORIGINAL_VIEW) return true;
+    const has = (node) => state.rewriteCache.has(cacheKey(view, state.originalMap.get(node)));
+    // The page level counts even with a few fragments missing (failed ones
+    // simply show their original text, same as in the normal page view); a
+    // level picked with ↓ is only ever switched to once all of it loaded.
+    return view.startsWith(PAGE_VIEW_PREFIX) ? units.some(has) : units.every(has);
+  }
+
+  // The views the label click cycles through: easiest level first, up to
+  // the hardest, then the original, then round again.
+  function loadedViews(block) {
+    const units = [...(state.blockUnits.get(block) || [])];
+    const current = blockView(block);
+    const candidates = state.levels.map((level) => (level === state.pageLevel ? pageView() : level));
+    if (!candidates.includes(current) && current !== ORIGINAL_VIEW) candidates.push(current);
+    const views = candidates.filter((view) => view === current || isViewLoaded(view, units));
+    views.push(ORIGINAL_VIEW);
+    return views;
+  }
+
+  // An Alt+select explanation inside the paragraph was about the text it's
+  // replacing, so it goes too — and an explanation that split a rewritten
+  // text node leaves a tail node behind that renderUnit() doesn't know about
+  // (see insertGlossNode()), which has to go before the node is re-rendered.
+  function clearExplanationsIn(block) {
+    for (const gloss of [...state.glossElements]) {
+      if (block.contains(gloss)) removeGloss(gloss);
+    }
+    for (const tail of [...state.glossTailNodes]) {
+      if (block.contains(tail)) {
+        tail.remove();
+        state.glossTailNodes.delete(tail);
+      }
+    }
+  }
+
+  // Once a paragraph shows a complete rewrite, its failure outlines are stale.
+  function clearFailuresIn(block) {
+    const units = state.blockUnits.get(block);
+    if (!units) return;
+    const cleared = [...state.failedSegments].filter((seg) => seg.nodes.every((n) => units.has(n)));
+    for (const seg of cleared) state.failedSegments.delete(seg);
+    for (const seg of cleared) {
+      if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
+    }
+    if (cleared.length) notifyState();
+  }
+
+  // Shows every fragment of the paragraph for `view`, from the cache.
+  function setBlockView(block, view) {
+    clearExplanationsIn(block);
+    if (view === pageView()) state.blockViews.delete(block);
+    else state.blockViews.set(block, view);
+    for (const node of state.blockUnits.get(block) || []) {
+      if (view === ORIGINAL_VIEW) {
+        renderUnit(node, null);
+        continue;
+      }
+      renderUnit(node, state.rewriteCache.get(cacheKey(view, state.originalMap.get(node))) ?? null);
+    }
+    block.classList.toggle('ai-reader-leveled', state.blockViews.has(block));
+    if (levelBar.block === block) updateLevelBar();
+  }
+
+  function cycleBlockView(block) {
+    const views = loadedViews(block);
+    if (views.length < 2) return;
+    const next = views[(views.indexOf(blockView(block)) + 1) % views.length];
+    setBlockView(block, next);
+  }
+
+  // A paragraph's fragments in reading order. Registration order isn't that:
+  // the scroll pipeline groups text nodes by parent element, so the words
+  // inside a <b> or <a> get registered after the text around them. A node
+  // swapped out for a gloss wrapper is placed by that wrapper instead.
+  function unitsInDocumentOrder(block) {
+    const placed = [...(state.blockUnits.get(block) || [])]
+      .map((node) => ({ node, at: state.rewriteWrappers.get(node) || node }))
+      .filter(({ at }) => at.isConnected);
+    placed.sort((a, b) => (a.at.compareDocumentPosition(b.at) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    return placed.map(({ node }) => node);
+  }
+
+  async function simplifyBlock(block) {
+    const target = simplerView(block);
+    if (!target || state.blockBusy.has(block)) return;
+    const gen = state.generation;
+    const label = viewLevel(target);
+    const missingTexts = () => {
+      const texts = [];
+      for (const node of state.blockUnits.get(block) || []) {
+        const text = state.originalMap.get(node);
+        if (!state.rewriteCache.has(cacheKey(target, text)) && !texts.includes(text)) texts.push(text);
+      }
+      return texts;
+    };
+    state.blockBusy.add(block);
+    block.classList.add('ai-reader-loading');
+    if (levelBar.block === block) updateLevelBar();
+    showStatus(`Rewriting this paragraph at ${label}…`);
+    try {
+      for (let round = 0; round < SIMPLIFY_MAX_ROUNDS; round++) {
+        const texts = missingTexts();
+        if (!texts.length) break;
+        const context = unitsInDocumentOrder(block)
+          .map((node) => state.originalMap.get(node))
+          .join('')
+          .slice(0, BLOCK_CONTEXT_MAX_CHARS);
+        for (const chunk of chunkItems(texts, (t) => t.length, MAX_BATCH_CHARS, MAX_BATCH_ITEMS)) {
+          await fetchRewrites(target, chunk, context);
+          if (gen !== state.generation) return;
+        }
+      }
+      if (gen !== state.generation) return;
+      if (missingTexts().length) {
+        showStatus(`Couldn't rewrite all of this paragraph at ${label} — try again`, 3000, true);
+        return;
+      }
+      setBlockView(block, target);
+      clearFailuresIn(block);
+      showStatus(`Paragraph rewritten at ${label}`, 1200);
+    } catch (err) {
+      if (gen === state.generation) showStatus(`Couldn't simplify this paragraph · ${failureReason(err)}`, 3000, true);
+    } finally {
+      state.blockBusy.delete(block);
+      block.classList.remove('ai-reader-loading');
+      if (levelBar.block === block) updateLevelBar();
+    }
+  }
+
+  // The hover bar itself: one shared element, fixed-positioned next to
+  // whichever paragraph the pointer is over, appended to <html> like the
+  // status toast so it never changes the page's own layout or text.
+  const levelBar = { el: null, label: null, down: null, block: null, hideTimer: null, lastTarget: null };
+  // How long the bar stays up after the pointer leaves the paragraph, so it
+  // can cross the gap into the bar.
+  const LEVEL_BAR_HIDE_DELAY_MS = 300;
+  const LEVEL_BAR_GAP_PX = 6;
+
+  function ensureLevelBar() {
+    if (levelBar.el) return;
+    const el = document.createElement('div');
+    el.className = 'ai-reader-levelbar ai-reader-ignore';
+    levelBar.label = document.createElement('button');
+    levelBar.label.type = 'button';
+    levelBar.label.className = 'ai-reader-levelbar__label';
+    levelBar.down = document.createElement('button');
+    levelBar.down.type = 'button';
+    levelBar.down.className = 'ai-reader-levelbar__down';
+    levelBar.down.textContent = '↓';
+    for (const [btn, onClick] of [
+      [levelBar.label, cycleBlockView],
+      [levelBar.down, simplifyBlock],
+    ]) {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (levelBar.block) onClick(levelBar.block);
+      });
+    }
+    el.append(levelBar.label, levelBar.down);
+    el.addEventListener('mouseenter', () => clearTimeout(levelBar.hideTimer));
+    el.addEventListener('mouseleave', scheduleHideLevelBar);
+    document.documentElement.appendChild(el);
+    levelBar.el = el;
+  }
+
+  function updateLevelBar() {
+    const block = levelBar.block;
+    if (!block || !levelBar.el) return;
+    const view = blockView(block);
+    const busy = state.blockBusy.has(block);
+    const views = loadedViews(block);
+    levelBar.label.textContent = view === ORIGINAL_VIEW ? 'Original' : viewLevel(view);
+    levelBar.label.disabled = busy || views.length < 2;
+    const names = views.map((v) => (v === ORIGINAL_VIEW ? 'original' : viewLevel(v)));
+    levelBar.label.title = `Reading level of this paragraph — click to switch (${names.join(' → ')})`;
+    const next = simplerView(block);
+    levelBar.down.disabled = busy || !next;
+    levelBar.down.title = busy ? 'Rewriting…' : next ? `Make this paragraph simpler (${viewLevel(next)})` : 'Already at the simplest level';
+    levelBar.down.setAttribute('aria-label', levelBar.down.title);
+    levelBar.el.classList.toggle('ai-reader-levelbar--busy', busy);
+  }
+
+  function positionLevelBar() {
+    const block = levelBar.block;
+    if (!block || !levelBar.el) return;
+    if (!block.isConnected) {
+      hideLevelBar();
+      return;
+    }
+    const rect = block.getBoundingClientRect();
+    const barWidth = levelBar.el.offsetWidth;
+    const barHeight = levelBar.el.offsetHeight;
+    // Left margin when there's room, otherwise pinned to the window's left
+    // edge; vertically at the paragraph's top, kept on screen while a tall
+    // paragraph scrolls past.
+    const left = Math.max(2, rect.left - barWidth - LEVEL_BAR_GAP_PX);
+    const top = Math.min(Math.max(rect.top, 4), Math.max(rect.bottom - barHeight, 4));
+    levelBar.el.style.left = `${left}px`;
+    levelBar.el.style.top = `${top}px`;
+  }
+
+  function showLevelBar(block) {
+    ensureLevelBar();
+    clearTimeout(levelBar.hideTimer);
+    levelBar.block = block;
+    updateLevelBar();
+    positionLevelBar();
+    levelBar.el.classList.add('ai-reader-levelbar--show');
+  }
+
+  function hideLevelBar() {
+    clearTimeout(levelBar.hideTimer);
+    levelBar.block = null;
+    levelBar.lastTarget = null;
+    levelBar.el?.classList.remove('ai-reader-levelbar--show');
+  }
+
+  function scheduleHideLevelBar() {
+    clearTimeout(levelBar.hideTimer);
+    levelBar.hideTimer = setTimeout(hideLevelBar, LEVEL_BAR_HIDE_DELAY_MS);
+  }
+
+  document.addEventListener('mouseover', (event) => {
+    if (!state.active) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target === levelBar.lastTarget) return;
+    if (levelBar.el?.contains(target)) {
+      // Forget the paragraph element the pointer came from, so moving back
+      // onto it counts as a fresh hover and cancels the bar's pending hide.
+      levelBar.lastTarget = null;
+      return;
+    }
+    levelBar.lastTarget = target;
+    if (target.closest('.ai-reader-status')) return;
+    const block = blockOf(target);
+    if (block && state.blockUnits.get(block)?.size) showLevelBar(block);
+    else scheduleHideLevelBar();
+  });
+
+  document.addEventListener('mouseout', (event) => {
+    if (!event.relatedTarget) scheduleHideLevelBar(); // pointer left the window
+  });
+
+  window.addEventListener('scroll', positionLevelBar, { capture: true, passive: true });
+  window.addEventListener('resize', positionLevelBar, { passive: true });
 
   // --- Alt+select "explain this" ------------------------------------------
   //
@@ -754,19 +1180,20 @@
     stopObserving();
     stopNavWatcher();
     state.trackedNodes = new WeakSet();
-    for (const [node, original] of state.originalMap.entries()) {
-      const wrapper = state.rewriteWrappers.get(node);
-      if (wrapper) {
-        // node itself was detached by applyRewrite()'s replaceWith — put a
-        // fresh plain text node with the original text where the wrapper is,
-        // instead of writing nodeValue onto the now-disconnected node.
-        wrapper.replaceWith(document.createTextNode(original));
-      } else {
-        node.nodeValue = original;
-      }
-    }
+    hideLevelBar();
+    for (const node of state.originalMap.keys()) renderUnit(node, null);
     state.originalMap.clear();
     state.rewriteWrappers.clear();
+    state.unitBlock = new WeakMap();
+    state.blockUnits = new WeakMap();
+    state.blockBusy.clear();
+    // A level picked for a paragraph comes back when rewrite mode is turned
+    // on again (its fragments are re-registered to the same element); a
+    // paragraph switched to "original" goes back to the page's level.
+    for (const [block, view] of [...state.blockViews]) {
+      block.classList.remove('ai-reader-leveled', 'ai-reader-loading');
+      if (view === ORIGINAL_VIEW || !block.isConnected) state.blockViews.delete(block);
+    }
     for (const tailNode of state.glossTailNodes) {
       tailNode.remove();
     }
