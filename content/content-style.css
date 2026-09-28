@@ -1,87 +1,15 @@
-.ai-reader-status {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 2147483647;
-  background: rgba(20, 20, 20, 0.85);
-  color: #fff;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  pointer-events: none;
-}
-
-.ai-reader-status--show {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.ai-reader-status--error {
-  background: rgba(180, 30, 30, 0.9);
-}
-
-/* Retry / × on a failure toast. The toast itself stays click-through so it
-   never blocks the page under it; only its buttons take clicks, and only
-   while it's showing. `all: unset` first so the host page's own button
-   styles can't leak in. */
-.ai-reader-status__action,
-.ai-reader-status__close {
-  all: unset;
-  box-sizing: border-box;
-  margin-left: 10px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font: inherit;
-  color: #fff;
-  cursor: pointer;
-}
-
-.ai-reader-status__action {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.ai-reader-status__action:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-.ai-reader-status__close {
-  margin-left: 4px;
-  padding: 2px 4px;
-  opacity: 0.8;
-}
-
-.ai-reader-status__close:hover {
-  opacity: 1;
-}
-
-.ai-reader-status__action:focus-visible,
-.ai-reader-status__close:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 1px;
-}
-
-.ai-reader-status--show .ai-reader-status__action,
-.ai-reader-status--show .ai-reader-status__close {
-  pointer-events: auto;
-}
-
 /* The outlines below are !important because some sites kill every outline
    with a global `* { outline: none !important }` (e.g. sspai.com); a class
    selector with !important outranks that. */
 
 /* A block whose rewrite failed: original text left untouched, marked with a
-   dashed outline (outline only, same reasoning as .ai-reader-loading below)
-   and clickable to retry just that block. Declared before .ai-reader-loading
-   so the loading outline wins while a retry is in flight. */
+   dashed outline (outline only, same reasoning as .ai-reader-loading below);
+   hovering its paragraph offers Retry on the level bar. Declared before
+   .ai-reader-loading so the loading outline wins while a retry is in flight. */
 .ai-reader-failed {
   outline: 1.5px dashed rgba(200, 60, 60, 0.75) !important;
   outline-offset: 2px !important;
   border-radius: 2px;
-  cursor: pointer;
 }
 
 /* Marks the block currently being sent to the AI. Deliberately never
@@ -127,9 +55,10 @@
 
 /* The per-paragraph level bar shown in a hovered paragraph's left margin
    (see showLevelBar() in content-script.js): the paragraph's level label
-   (click to switch versions) and a ↓ "simpler" button. Same dark,
-   theme-independent look as the status toast; appended to <html> and
-   fixed-positioned, so it never takes part in the page's layout. */
+   (click to switch versions) and a ↓ "simpler" button — or, while the
+   paragraph has failed fragments, just a Retry button. Dark and
+   theme-independent; appended to <html> and fixed-positioned, so it never
+   takes part in the page's layout. */
 .ai-reader-levelbar {
   position: fixed;
   z-index: 2147483647;
@@ -154,7 +83,8 @@
 
 /* `all: unset` first so the host page's own button styles can't leak in. */
 .ai-reader-levelbar__label,
-.ai-reader-levelbar__down {
+.ai-reader-levelbar__down,
+.ai-reader-levelbar__retry {
   all: unset;
   box-sizing: border-box;
   padding: 4px 6px;
@@ -175,6 +105,23 @@
   background: rgba(75, 119, 116, 0.9);
 }
 
+/* Same red as the failed outline: Retry, and a ↓ whose last try failed. */
+.ai-reader-levelbar__retry,
+.ai-reader-levelbar__down--failed {
+  background: rgba(200, 60, 60, 0.9);
+}
+
+/* Retry replaces the level controls while the paragraph has failures. */
+.ai-reader-levelbar__retry,
+.ai-reader-levelbar--retry .ai-reader-levelbar__label,
+.ai-reader-levelbar--retry .ai-reader-levelbar__down {
+  display: none;
+}
+
+.ai-reader-levelbar--retry .ai-reader-levelbar__retry {
+  display: block;
+}
+
 .ai-reader-levelbar__label:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.18);
 }
@@ -183,25 +130,34 @@
   background: rgba(75, 119, 116, 1);
 }
 
+.ai-reader-levelbar__retry:hover:not(:disabled),
+.ai-reader-levelbar__down--failed:hover:not(:disabled) {
+  background: rgba(200, 60, 60, 1);
+}
+
 .ai-reader-levelbar__label:disabled,
-.ai-reader-levelbar__down:disabled {
+.ai-reader-levelbar__down:disabled,
+.ai-reader-levelbar__retry:disabled {
   cursor: default;
   opacity: 0.45;
 }
 
 .ai-reader-levelbar__label:focus-visible,
-.ai-reader-levelbar__down:focus-visible {
+.ai-reader-levelbar__down:focus-visible,
+.ai-reader-levelbar__retry:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 1px;
 }
 
-/* While that paragraph's "simpler" request is in flight. */
-.ai-reader-levelbar--busy .ai-reader-levelbar__down {
+/* While that paragraph's "simpler" or retry request is in flight. */
+.ai-reader-levelbar--busy .ai-reader-levelbar__down,
+.ai-reader-levelbar--busy .ai-reader-levelbar__retry {
   animation: ai-reader-gloss-pulse 1s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ai-reader-levelbar--busy .ai-reader-levelbar__down {
+  .ai-reader-levelbar--busy .ai-reader-levelbar__down,
+  .ai-reader-levelbar--busy .ai-reader-levelbar__retry {
     animation: none;
   }
 }

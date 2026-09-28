@@ -71,7 +71,9 @@
     unitBlock: new WeakMap(), // text node in originalMap -> the paragraph element it belongs to (see blockOf())
     blockUnits: new WeakMap(), // paragraph element -> Set of its text nodes in originalMap
     blockViews: new Map(), // paragraph element -> its view, only for paragraphs not at the page's level; survives restore() so they come back at the level the reader picked
-    blockBusy: new Set(), // paragraphs with a "simpler" request in flight
+    blockBusy: new Set(), // paragraphs with a "simpler" or retry request in flight
+    blockRetrying: new Set(), // the ones of those that are retrying failed fragments
+    blockErrors: new Map(), // paragraph element -> error from its last "simpler" request, shown on the ↓ button until the next try
     trackedNodes: new WeakSet(), // nodes already scheduled at least once (processed or pending)
     observer: null,
     elToSegments: null, // Element -> segment[] awaiting that element's visibility
@@ -85,7 +87,6 @@
     failedSegments: new Set(), // segments (or the leftover nodes of one) whose rewrite failed, waiting for Retry
     paused: false, // set after a non-retryable error or too many failures in a row; drain() stays idle until Retry
     consecutiveFailures: 0,
-    lastError: null, // most recent batch failure, for the reason shown on the failure toast
     anyRewritten: false, // at least one text node on the page currently shows a rewrite
   };
 
@@ -435,16 +436,19 @@
   // --- Failure tracking and retry ------------------------------------------
   //
   // A failed segment keeps its original text, gets a dashed outline, and
-  // waits in state.failedSegments. Every manual retry — the toast's Retry
-  // button, clicking a failed block, the popup — goes through retrySegments(),
-  // which puts them back at the front of the normal drain() queue.
+  // waits in state.failedSegments. Its paragraph's hover bar then offers
+  // Retry instead of the level controls (see retryBlock()); the popup's
+  // "retry all" goes through retrySegments(), which puts them back at the
+  // front of the normal drain() queue.
 
   function markFailed(seg, err) {
     seg.queued = false;
     seg.done = true;
+    seg.err = err;
+    seg.block = blockOf(seg.el);
     seg.el.classList.add('ai-reader-failed');
     state.failedSegments.add(seg);
-    state.lastError = err;
+    if (levelBar.block === seg.block) updateLevelBar();
   }
 
   // Nodes that aren't part of a scroll-pipeline segment (selection mode, or
@@ -454,18 +458,27 @@
     for (const seg of buildSegments(nodes)) markFailed(seg, err);
   }
 
+  // Several segments can share an element (same parent, non-adjacent
+  // text) — only drop the outline once none of them is still failed.
+  function unmarkFailed(segs) {
+    for (const seg of segs) state.failedSegments.delete(seg);
+    for (const seg of segs) {
+      if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
+    }
+    if (segs.some((seg) => seg.block === levelBar.block)) updateLevelBar();
+  }
+
+  function failedSegmentsIn(block) {
+    return [...state.failedSegments].filter((seg) => seg.block === block);
+  }
+
   function retrySegments(segs) {
     state.paused = false;
     state.consecutiveFailures = 0;
+    unmarkFailed(segs);
     for (const seg of segs) {
-      state.failedSegments.delete(seg);
       seg.queued = true;
       seg.done = false;
-    }
-    // Several segments can share an element (same parent, non-adjacent
-    // text) — only drop the outline once none of them is still failed.
-    for (const seg of segs) {
-      if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
     }
     state.queue.unshift(...segs);
     notifyState();
@@ -476,6 +489,45 @@
 
   function retryAllFailed() {
     retrySegments([...state.failedSegments]);
+  }
+
+  // The hover bar's Retry: sends just this paragraph's failed fragments,
+  // right away rather than behind the rest of the page's queue, and keeps
+  // the bar in its retry state until they're back.
+  async function retryBlock(block) {
+    const segs = failedSegmentsIn(block);
+    if (!segs.length || state.blockBusy.has(block)) return;
+    const gen = state.generation;
+    unmarkFailed(segs);
+    state.blockBusy.add(block);
+    state.blockRetrying.add(block);
+    if (levelBar.block === block) updateLevelBar();
+    notifyState();
+    try {
+      const nodes = segs.flatMap((seg) => seg.nodes);
+      for (const batch of chunkItems(nodes, (n) => n.nodeValue.length, MAX_BATCH_CHARS, MAX_BATCH_ITEMS)) {
+        try {
+          const missing = await processNodeBatch(batch, gen);
+          if (gen !== state.generation) return;
+          if (missing.length) markNodesFailed(missing, partialResultError());
+        } catch (err) {
+          if (gen !== state.generation) return;
+          markNodesFailed(batch, err);
+        }
+      }
+      // The page-wide queue may have paused on the same error that failed
+      // this paragraph; now that it went through, pick the queue back up.
+      if (state.paused && !failedSegmentsIn(block).length) {
+        state.paused = false;
+        state.consecutiveFailures = 0;
+        scheduleDrain(gen);
+      }
+    } finally {
+      state.blockBusy.delete(block);
+      state.blockRetrying.delete(block);
+      if (levelBar.block === block) updateLevelBar();
+      if (gen === state.generation) notifyState();
+    }
   }
 
   function failureReason(err) {
@@ -501,31 +553,6 @@
   function failedBlockCount() {
     return new Set([...state.failedSegments].map((s) => s.el)).size;
   }
-
-  function showFailure() {
-    const count = failedBlockCount();
-    if (!count) return;
-    const err = state.lastError;
-    const reason = failureReason(err);
-    let text;
-    if (err?.retryable === false) text = reason;
-    else if (state.paused) text = `Paused after repeated failures · ${reason}`;
-    else text = `${count} ${count === 1 ? 'block' : 'blocks'} failed · ${reason}`;
-    showStatus(text, 0, true, { label: 'Retry', onClick: retryAllFailed });
-  }
-
-  document.addEventListener('click', (event) => {
-    if (event.altKey) return;
-    const target = event.target instanceof Element ? event.target : null;
-    const el = target?.closest('.ai-reader-failed');
-    if (!el) return;
-    // Leave real controls inside a failed block (links, buttons…) alone, and
-    // don't treat the end of a drag-to-select as a click.
-    if (target.closest('a, button, input, select, textarea, label, summary')) return;
-    if (!window.getSelection()?.isCollapsed) return;
-    const segs = [...state.failedSegments].filter((s) => s.el === el);
-    if (segs.length) retrySegments(segs);
-  });
 
   // --- Lazy, scroll-driven pipeline for "process whole page" -------------
 
@@ -630,7 +657,6 @@
     state.draining = true;
     state.busy = true;
     notifyState();
-    showStatus('Rewriting…');
     try {
       while (state.queue.length && gen === state.generation && !state.paused) {
         const batch = [];
@@ -674,10 +700,6 @@
         // not only once the whole queue has drained.
         if (gen === state.generation) notifyState();
       }
-      if (gen === state.generation) {
-        if (state.failedSegments.size) showFailure();
-        else showStatus('Rewritten', 1200);
-      }
     } finally {
       state.draining = false;
       state.busy = false;
@@ -708,7 +730,6 @@
     state.active = true;
     state.busy = false;
     notifyState();
-    showStatus('Rewrite mode on — processing visible content…');
     await loadLevels();
     if (gen !== state.generation) return; // restored before the level arrived
     scanAndObserve(gen);
@@ -724,7 +745,6 @@
     const gen = state.generation;
     state.busy = true;
     notifyState();
-    showStatus('Rewriting…');
     try {
       if (!state.active) await loadLevels();
       if (gen !== state.generation) return;
@@ -736,7 +756,6 @@
       // unless the error says retrying can't help, in which case the
       // remaining chunks are marked failed without sending doomed requests.
       let fatalErr = null;
-      let anyFailed = false;
       for (const batch of chunks) {
         if (fatalErr) {
           markNodesFailed(batch, fatalErr);
@@ -745,22 +764,16 @@
         try {
           const missing = await processNodeBatch(batch, gen);
           if (gen !== state.generation) return;
-          if (missing.length) {
-            markNodesFailed(missing, partialResultError());
-            anyFailed = true;
-          }
+          if (missing.length) markNodesFailed(missing, partialResultError());
         } catch (err) {
           if (gen !== state.generation) return;
           markNodesFailed(batch, err);
-          anyFailed = true;
           if (err?.retryable === false) fatalErr = err;
         }
       }
       // Active even if some parts failed — the page now has rewritten text
       // and/or failure outlines that only restore() clears.
       state.active = true;
-      if (anyFailed) showFailure();
-      else showStatus('Rewritten', 1500);
     } finally {
       state.busy = false;
       if (gen === state.generation) notifyState();
@@ -827,10 +840,7 @@
     const units = state.blockUnits.get(block);
     if (!units) return;
     const cleared = [...state.failedSegments].filter((seg) => seg.nodes.every((n) => units.has(n)));
-    for (const seg of cleared) state.failedSegments.delete(seg);
-    for (const seg of cleared) {
-      if (![...state.failedSegments].some((s) => s.el === seg.el)) seg.el.classList.remove('ai-reader-failed');
-    }
+    unmarkFailed(cleared);
     if (cleared.length) notifyState();
   }
 
@@ -872,7 +882,6 @@
     const target = simplerView(block);
     if (!target || state.blockBusy.has(block)) return;
     const gen = state.generation;
-    const label = viewLevel(target);
     const missingTexts = () => {
       const texts = [];
       for (const node of state.blockUnits.get(block) || []) {
@@ -882,9 +891,9 @@
       return texts;
     };
     state.blockBusy.add(block);
+    state.blockErrors.delete(block);
     block.classList.add('ai-reader-loading');
     if (levelBar.block === block) updateLevelBar();
-    showStatus(`Rewriting this paragraph at ${label}…`);
     try {
       for (let round = 0; round < SIMPLIFY_MAX_ROUNDS; round++) {
         const texts = missingTexts();
@@ -900,14 +909,13 @@
       }
       if (gen !== state.generation) return;
       if (missingTexts().length) {
-        showStatus(`Couldn't rewrite all of this paragraph at ${label} — try again`, 3000, true);
+        state.blockErrors.set(block, partialResultError());
         return;
       }
       setBlockView(block, target);
       clearFailuresIn(block);
-      showStatus(`Paragraph rewritten at ${label}`, 1200);
     } catch (err) {
-      if (gen === state.generation) showStatus(`Couldn't simplify this paragraph · ${failureReason(err)}`, 3000, true);
+      if (gen === state.generation) state.blockErrors.set(block, err);
     } finally {
       state.blockBusy.delete(block);
       block.classList.remove('ai-reader-loading');
@@ -920,7 +928,7 @@
   // explanation, which has a level of its own (`gloss` set, `block` null) —
   // appended to <html> like the status toast so it never changes the page's
   // own layout or text.
-  const levelBar = { el: null, label: null, down: null, block: null, gloss: null, hideTimer: null, lastTarget: null };
+  const levelBar = { el: null, label: null, down: null, retry: null, block: null, gloss: null, hideTimer: null, lastTarget: null };
   // How long the bar stays up after the pointer leaves the paragraph, so it
   // can cross the gap into the bar.
   const LEVEL_BAR_HIDE_DELAY_MS = 300;
@@ -939,34 +947,49 @@
     levelBar.down.type = 'button';
     levelBar.down.className = 'ai-reader-levelbar__down';
     levelBar.down.textContent = '↓';
+    levelBar.retry = document.createElement('button');
+    levelBar.retry.type = 'button';
+    levelBar.retry.className = 'ai-reader-levelbar__retry';
+    levelBar.retry.textContent = 'Retry';
     for (const [btn, onBlock, onGloss] of [
       [levelBar.label, cycleBlockView, cycleExplanation],
       [levelBar.down, simplifyBlock, simplifyExplanation],
+      [levelBar.retry, retryBlock, null],
     ]) {
       btn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (levelBar.gloss) onGloss(levelBar.gloss);
+        if (levelBar.gloss) onGloss?.(levelBar.gloss);
         else if (levelBar.block) onBlock(levelBar.block);
       });
     }
-    el.append(levelBar.label, levelBar.down);
+    el.append(levelBar.label, levelBar.down, levelBar.retry);
     el.addEventListener('mouseenter', () => clearTimeout(levelBar.hideTimer));
     el.addEventListener('mouseleave', () => scheduleHideLevelBar());
     document.documentElement.appendChild(el);
     levelBar.el = el;
   }
 
+  // After a failed "simpler" request the ↓ turns red and carries the
+  // reason, until the next try — the text itself just stays as it was.
+  function setDownButton(busy, next, what, error) {
+    levelBar.down.disabled = busy || !next;
+    levelBar.down.classList.toggle('ai-reader-levelbar__down--failed', !!error && !busy);
+    if (busy) levelBar.down.title = 'Rewriting…';
+    else if (!next) levelBar.down.title = 'Already at the simplest level';
+    else if (error) levelBar.down.title = `Couldn't make this ${what} simpler · ${failureReason(error)} — click to try again`;
+    else levelBar.down.title = `Make this ${what} simpler (${next})`;
+    levelBar.down.setAttribute('aria-label', levelBar.down.title);
+  }
+
   function updateGlossLevelBar() {
     const info = explanations.get(levelBar.gloss);
     const levels = loadedExplanationLevels(info);
+    levelBar.el.classList.remove('ai-reader-levelbar--retry');
     levelBar.label.textContent = info.level;
     levelBar.label.disabled = info.busy || levels.length < 2;
     levelBar.label.title = `Reading level of this explanation — click to switch (${levels.join(' → ')})`;
-    const next = simplerExplanationLevel(info);
-    levelBar.down.disabled = info.busy || !next;
-    levelBar.down.title = info.busy ? 'Rewriting…' : next ? `Make this explanation simpler (${next})` : 'Already at the simplest level';
-    levelBar.down.setAttribute('aria-label', levelBar.down.title);
+    setDownButton(info.busy, simplerExplanationLevel(info), 'explanation', info.error);
     levelBar.el.classList.toggle('ai-reader-levelbar--busy', info.busy);
   }
 
@@ -977,18 +1000,29 @@
     }
     const block = levelBar.block;
     if (!block || !levelBar.el) return;
-    const view = blockView(block);
     const busy = state.blockBusy.has(block);
+    levelBar.el.classList.toggle('ai-reader-levelbar--busy', busy);
+    // A paragraph with failed fragments doesn't really show its level, so
+    // the bar offers Retry instead of the level controls until it's through.
+    const failed = failedSegmentsIn(block);
+    const retrying = state.blockRetrying.has(block);
+    levelBar.el.classList.toggle('ai-reader-levelbar--retry', retrying || failed.length > 0);
+    if (retrying || failed.length) {
+      levelBar.retry.disabled = busy;
+      levelBar.retry.title = retrying
+        ? 'Retrying…'
+        : `Couldn't rewrite this paragraph · ${failureReason(failed[failed.length - 1].err)} — click to retry`;
+      levelBar.retry.setAttribute('aria-label', levelBar.retry.title);
+      return;
+    }
+    const view = blockView(block);
     const views = loadedViews(block);
     levelBar.label.textContent = view === ORIGINAL_VIEW ? 'Original' : viewLevel(view);
     levelBar.label.disabled = busy || views.length < 2;
     const names = views.map((v) => (v === ORIGINAL_VIEW ? 'original' : viewLevel(v)));
     levelBar.label.title = `Reading level of this paragraph — click to switch (${names.join(' → ')})`;
     const next = simplerView(block);
-    levelBar.down.disabled = busy || !next;
-    levelBar.down.title = busy ? 'Rewriting…' : next ? `Make this paragraph simpler (${viewLevel(next)})` : 'Already at the simplest level';
-    levelBar.down.setAttribute('aria-label', levelBar.down.title);
-    levelBar.el.classList.toggle('ai-reader-levelbar--busy', busy);
+    setDownButton(busy, next && viewLevel(next), 'paragraph', state.blockErrors.get(block));
   }
 
   function positionLevelBar() {
@@ -1059,7 +1093,7 @@
       return;
     }
     const block = blockOf(target);
-    if (block && state.blockUnits.get(block)?.size) showLevelBar(block);
+    if (block && (state.blockUnits.get(block)?.size || failedSegmentsIn(block).length)) showLevelBar(block);
     else scheduleHideLevelBar();
   }
 
@@ -1074,7 +1108,6 @@
       return;
     }
     levelBar.lastTarget = target;
-    if (target.closest('.ai-reader-status')) return;
     // An explanation's bar sits above it, over the paragraph's text: moving
     // up to it gets the same grace period as leaving the bar, rather than
     // the paragraph's own bar taking its place at once.
@@ -1099,7 +1132,8 @@
   // as the in-line <ai-gloss> case in applyRewrite().
 
   // Alt+select gloss element -> { text, context, level (shown, null until
-  // the first explanation arrives), results: level -> explanation, busy }.
+  // the first explanation arrives), results: level -> explanation, busy,
+  // error (from the last "simpler" request, shown on the ↓ button) }.
   const explanations = new WeakMap();
 
   function getExplainContext(range) {
@@ -1160,10 +1194,7 @@
   }
 
   async function explainRange(range, text) {
-    if (text.length > EXPLAIN_MAX_CHARS) {
-      showStatus('Selection is too long — choose a single word or sentence', 2500, true);
-      return;
-    }
+    if (text.length > EXPLAIN_MAX_CHARS) return;
     // Read before the placeholder goes in, so it isn't part of the context.
     const context = getExplainContext(range);
     // "ethnicity" -> "ethnicity(……)" while the request is in flight, so the
@@ -1173,11 +1204,10 @@
     try {
       gloss = insertGlossNode(range, '……');
       gloss.classList.add('ai-reader-gloss--loading');
-    } catch (err) {
-      showStatus("Couldn't insert an explanation here: " + (err?.message || err), 3000, true);
+    } catch {
       return;
     }
-    explanations.set(gloss, { text, context, level: null, results: new Map(), busy: false });
+    explanations.set(gloss, { text, context, level: null, results: new Map(), busy: false, error: null });
     requestExplanation(gloss);
   }
 
@@ -1209,7 +1239,6 @@
     gloss.classList.add('ai-reader-gloss--loading');
     gloss.removeAttribute('title');
     gloss.onclick = null;
-    showStatus('Generating explanation…');
     try {
       // The first explanation is at the reader's target level, the same one
       // the page rewrite uses; ↓ on the hover bar steps it down from there.
@@ -1219,7 +1248,6 @@
       if (!gloss.isConnected) return; // restored or re-rendered away meanwhile
       if (!explanation) {
         removeGloss(gloss);
-        showStatus("Couldn't generate an explanation for the selection", 2000, true);
         return;
       }
       info.results.set(level, explanation);
@@ -1227,7 +1255,6 @@
       gloss.classList.remove('ai-reader-gloss--loading');
       state.active = true;
       notifyState();
-      showStatus('Explanation added', 1200);
     } catch (err) {
       if (!gloss.isConnected) return;
       gloss.textContent = ' (failed · retry)';
@@ -1244,7 +1271,6 @@
       // restore() it away.
       state.active = true;
       notifyState();
-      showStatus('Explanation failed · ' + failureReason(err), 3000, true);
     }
   }
 
@@ -1292,21 +1318,20 @@
       return;
     }
     info.busy = true;
+    info.error = null;
     gloss.classList.add('ai-reader-gloss--loading');
     if (levelBar.gloss === gloss) updateLevelBar();
-    showStatus(`Rewriting this explanation at ${target}…`);
     try {
       const explanation = await fetchExplanation(info, target, info.results.get(info.level));
       if (!gloss.isConnected) return;
       if (!explanation) {
-        showStatus(`Couldn't explain this at ${target}`, 2500, true);
+        info.error = new Error(`Couldn't explain this at ${target}`);
         return;
       }
       info.results.set(target, explanation);
       showExplanation(gloss, target);
-      showStatus(`Explanation rewritten at ${target}`, 1200);
     } catch (err) {
-      if (gloss.isConnected) showStatus(`Couldn't simplify this explanation · ${failureReason(err)}`, 3000, true);
+      info.error = err;
     } finally {
       info.busy = false;
       gloss.classList.remove('ai-reader-gloss--loading');
@@ -1344,6 +1369,8 @@
     state.unitBlock = new WeakMap();
     state.blockUnits = new WeakMap();
     state.blockBusy.clear();
+    state.blockRetrying.clear();
+    state.blockErrors.clear();
     // A level picked for a paragraph comes back when rewrite mode is turned
     // on again (its fragments are re-registered to the same element); a
     // paragraph switched to "original" goes back to the page's level.
@@ -1362,12 +1389,10 @@
     state.failedSegments.clear();
     state.paused = false;
     state.consecutiveFailures = 0;
-    state.lastError = null;
     state.anyRewritten = false;
     state.active = false;
     state.busy = false;
     notifyState();
-    showStatus('Original text restored', 1200);
   }
 
   // What the toolbar icon should show (see setTabIcon() in the background):
@@ -1388,44 +1413,6 @@
     if (key === lastNotified) return;
     lastNotified = key;
     chrome.runtime.sendMessage({ type: 'STATE_CHANGED', active: state.active, icon }).catch(() => {});
-  }
-
-  let statusEl;
-  let statusTimer;
-  // `action` ({ label, onClick }) adds a button plus a close ×; such a toast
-  // stays up (pass no timeout) until acted on, dismissed, or replaced.
-  function showStatus(text, timeout, isError, action) {
-    if (!statusEl) {
-      statusEl = document.createElement('div');
-      statusEl.className = 'ai-reader-status ai-reader-ignore';
-      document.documentElement.appendChild(statusEl);
-    }
-    statusEl.textContent = text;
-    if (action) {
-      statusEl.append(
-        statusButton(action.label, 'ai-reader-status__action', action.onClick),
-        statusButton('×', 'ai-reader-status__close', () => statusEl.classList.remove('ai-reader-status--show'), 'Dismiss')
-      );
-    }
-    statusEl.classList.toggle('ai-reader-status--error', !!isError);
-    statusEl.classList.add('ai-reader-status--show');
-    clearTimeout(statusTimer);
-    if (timeout) {
-      statusTimer = setTimeout(() => statusEl.classList.remove('ai-reader-status--show'), timeout);
-    }
-  }
-
-  function statusButton(label, className, onClick, ariaLabel) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = className;
-    btn.textContent = label;
-    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
-    btn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      onClick();
-    });
-    return btn;
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

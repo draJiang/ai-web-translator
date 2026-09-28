@@ -90,7 +90,7 @@ retryBtn.addEventListener('click', async () => {
 });
 
 // Only shown when the page has blocks whose rewrite failed (see PING in the
-// content script); the page's own toast has the same Retry.
+// content script); each failed paragraph also offers Retry on its hover bar.
 function showFailed(count) {
   failedText.textContent = `${count} ${count === 1 ? 'block' : 'blocks'} failed`;
   failedRow.classList.toggle('hidden', !count);
