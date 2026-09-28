@@ -64,7 +64,7 @@
     active: false, // true once the user has turned B1 mode on for this page
     busy: false, // a batch request is currently in flight
     generation: 0, // bumped on every start/restore so stale async results are dropped
-    levels: ['A1', 'A2', 'B1', 'B2'], // reading levels, easiest first — replaced by LEVELS from lib/prompts.js via GET_LEVELS
+    levels: ['A1', 'A2', 'B1', 'B2', 'C1'], // reading levels, easiest first — replaced by LEVELS from lib/prompts.js via GET_LEVELS
     pageLevel: 'B1', // the user's target level, read when rewrite mode starts
     originalMap: new Map(), // text node -> original text
     rewriteCache: new Map(), // view + original text (see cacheKey()) -> rewritten text, survives restore() so turning rewrite mode back on doesn't re-call the API for text seen before
@@ -378,8 +378,6 @@
         const rewritten = state.rewriteCache.get(key);
         if (rewritten) renderUnit(node, rewritten);
         else if (requested.has(key)) missing.push(node);
-        const block = state.unitBlock.get(node);
-        if (block && state.blockViews.has(block)) block.classList.add('ai-reader-leveled');
       }
       return missing;
     } finally {
@@ -762,8 +760,7 @@
   // Hovering a rewritten paragraph shows a small bar in its left margin: a
   // label with the level the paragraph is shown at (click it to switch
   // between the versions already loaded and the original), and a ↓ button
-  // that rewrites just that paragraph one level lower. A paragraph not at
-  // the page's own level also gets a thin bar down its left edge.
+  // that rewrites just that paragraph one level lower.
   //
   // A lower level is always rewritten from the original text, never from
   // the already-simplified version, so meaning doesn't drift a bit more with
@@ -837,7 +834,6 @@
       }
       renderUnit(node, state.rewriteCache.get(cacheKey(view, state.originalMap.get(node))) ?? null);
     }
-    block.classList.toggle('ai-reader-leveled', state.blockViews.has(block));
     if (levelBar.block === block) updateLevelBar();
   }
 
@@ -1191,7 +1187,6 @@
     // on again (its fragments are re-registered to the same element); a
     // paragraph switched to "original" goes back to the page's level.
     for (const [block, view] of [...state.blockViews]) {
-      block.classList.remove('ai-reader-leveled', 'ai-reader-loading');
       if (view === ORIGINAL_VIEW || !block.isConnected) state.blockViews.delete(block);
     }
     for (const tailNode of state.glossTailNodes) {

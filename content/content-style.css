@@ -125,15 +125,6 @@
   }
 }
 
-/* A paragraph shown at a level the reader picked for it (or switched back to
-   the original), rather than the page's own level: a thin theme-colored bar
-   just outside its left edge. A box-shadow with a negative spread paints
-   only that sliver outside the box — a paint layer like the outlines above,
-   so nothing in the layout moves. */
-.ai-reader-leveled {
-  box-shadow: -4px 0 0 -1px rgba(75, 119, 116, 0.7) !important;
-}
-
 /* The per-paragraph level bar shown in a hovered paragraph's left margin
    (see showLevelBar() in content-script.js): the paragraph's level label
    (click to switch versions) and a ↓ "simpler" button. Same dark,
