@@ -284,8 +284,20 @@
       if (!wrapper.parentNode) return; // the page itself removed it meanwhile
       wrapper.replaceWith(node);
     }
-    if (text == null) node.nodeValue = state.originalMap.get(node);
-    else applyRewrite(node, text);
+    const original = state.originalMap.get(node);
+    if (text == null) node.nodeValue = original;
+    else applyRewrite(node, withEdgeWhitespace(original, text));
+  }
+
+  // Each text node is rewritten on its own, and the model tends to trim the
+  // fragment it's given — but a node's edge whitespace is often the only
+  // space between it and a neighbouring <a>/<b>/<em>, so losing it glues
+  // words together ("making<a>an app</a>to"). The original's edges are what
+  // the surrounding layout relies on, so they always win over the model's.
+  function withEdgeWhitespace(original, rewritten) {
+    const lead = original.match(/^\s*/)[0];
+    const trail = original.match(/\s*$/)[0];
+    return lead + rewritten.trim() + trail;
   }
 
   // Every rewrite request — the scroll pipeline's batches and a paragraph's
