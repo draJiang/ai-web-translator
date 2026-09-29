@@ -55,9 +55,9 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'PROCESS_BATCH') {
-    const { level, explicitLevel, context } = message;
+    const { level, explicitLevel, context, retry } = message;
     getSettings()
-      .then((settings) => processBatch(settings, message.texts, { level, explicitLevel, context }))
+      .then((settings) => processBatch(settings, message.texts, { level, explicitLevel, context, retry }))
       .then((result) => sendResponse({ ok: true, results: result }))
       .catch((err) => sendResponse(errorResponse(err)));
     return true; // keep the message channel open for the async response

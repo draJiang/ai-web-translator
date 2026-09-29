@@ -313,8 +313,10 @@
 
   // Asks for `texts` rewritten for `view` and caches whatever comes back.
   // Throws if the request as a whole failed; items the background couldn't
-  // salvage from a malformed response are simply left uncached.
-  async function fetchRewrites(view, texts, context) {
+  // salvage from a malformed response are simply left uncached. `retry`
+  // marks texts that failed before, so the background samples a fresh
+  // answer instead of repeating the one that failed.
+  async function fetchRewrites(view, texts, context, retry = false) {
     let res;
     try {
       res = await withRequestSlot(() =>
@@ -324,6 +326,7 @@
           level: viewLevel(view),
           explicitLevel: !view.startsWith(PAGE_VIEW_PREFIX),
           context,
+          retry,
         })
       );
     } catch (err) {
@@ -340,8 +343,9 @@
   // Returns the nodes that came back without a rewrite (the background could
   // only salvage part of a malformed AI response — see processBatch() in
   // lib/providers.js) so the caller can mark just those as failed. Throws if
-  // the request as a whole failed.
-  async function processNodeBatch(nodes, gen) {
+  // the request as a whole failed. `context` (optional) is sent along as the
+  // paragraph the nodes come from; `retry` as in fetchRewrites().
+  async function processNodeBatch(nodes, gen, { context, retry = false } = {}) {
     // Captured once, up front: applyRewrite() may detach a node from the DOM
     // (node.replaceWith(wrapper) when it contains a gloss), so re-deriving
     // parentElement from `nodes` afterwards would silently miss those
@@ -371,7 +375,7 @@
       }
       for (const [view, texts] of toFetch) {
         try {
-          await fetchRewrites(view, texts);
+          await fetchRewrites(view, texts, context, retry);
         } catch (err) {
           if (gen !== state.generation) return [];
           throw err;
@@ -479,6 +483,7 @@
     for (const seg of segs) {
       seg.queued = true;
       seg.done = false;
+      seg.retry = true;
     }
     state.queue.unshift(...segs);
     notifyState();
@@ -505,9 +510,14 @@
     notifyState();
     try {
       const nodes = segs.flatMap((seg) => seg.nodes);
+      // The paragraph as context — the same thing a "simpler" request
+      // sends — gives the model more to go on than the lone fragment the
+      // failed attempt was split down to (see processBatch() in
+      // lib/providers.js).
+      const context = blockContext(block);
       for (const batch of chunkItems(nodes, (n) => n.nodeValue.length, MAX_BATCH_CHARS, MAX_BATCH_ITEMS)) {
         try {
-          const missing = await processNodeBatch(batch, gen);
+          const missing = await processNodeBatch(batch, gen, { context, retry: true });
           if (gen !== state.generation) return;
           if (missing.length) markNodesFailed(missing, partialResultError());
         } catch (err) {
@@ -668,6 +678,9 @@
           if (batch.length && (batch.length + seg.nodes.length > MAX_BATCH_ITEMS || chars + segChars > MAX_BATCH_CHARS)) {
             break;
           }
+          // Retried segments go out on their own, never mixed into a batch of
+          // text that hasn't failed yet (see fetchRewrites()).
+          if (batchSegs.length && !!seg.retry !== !!batchSegs[0].retry) break;
           state.queue.shift();
           seg.done = true;
           batchSegs.push(seg);
@@ -676,7 +689,7 @@
         }
         if (!batch.length) break;
         try {
-          const missing = new Set(await processNodeBatch(batch, gen));
+          const missing = new Set(await processNodeBatch(batch, gen, { retry: !!batchSegs[0].retry }));
           if (gen !== state.generation) break;
           state.consecutiveFailures = 0;
           if (missing.size) {
@@ -878,6 +891,15 @@
     return placed.map(({ node }) => node);
   }
 
+  // The paragraph's original text, sent along with a request for some of
+  // its fragments so the model sees them in context.
+  function blockContext(block) {
+    return unitsInDocumentOrder(block)
+      .map((node) => state.originalMap.get(node))
+      .join('')
+      .slice(0, BLOCK_CONTEXT_MAX_CHARS);
+  }
+
   async function simplifyBlock(block) {
     const target = simplerView(block);
     if (!target || state.blockBusy.has(block)) return;
@@ -898,10 +920,7 @@
       for (let round = 0; round < SIMPLIFY_MAX_ROUNDS; round++) {
         const texts = missingTexts();
         if (!texts.length) break;
-        const context = unitsInDocumentOrder(block)
-          .map((node) => state.originalMap.get(node))
-          .join('')
-          .slice(0, BLOCK_CONTEXT_MAX_CHARS);
+        const context = blockContext(block);
         for (const chunk of chunkItems(texts, (t) => t.length, MAX_BATCH_CHARS, MAX_BATCH_ITEMS)) {
           await fetchRewrites(target, chunk, context);
           if (gen !== state.generation) return;
