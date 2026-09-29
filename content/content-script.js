@@ -969,7 +969,7 @@
     levelBar.explain = document.createElement('button');
     levelBar.explain.type = 'button';
     levelBar.explain.className = 'ai-reader-levelbar__explain';
-    levelBar.explain.textContent = 'Explain';
+    levelBar.explain.appendChild(explainIcon());
     levelBar.retry = document.createElement('button');
     levelBar.retry.type = 'button';
     levelBar.retry.className = 'ai-reader-levelbar__retry';
@@ -992,6 +992,28 @@
     el.addEventListener('mouseleave', () => scheduleHideLevelBar());
     document.documentElement.appendChild(el);
     levelBar.el = el;
+  }
+
+  // A speech bubble with text lines: "have it explained". Built with DOM
+  // calls rather than innerHTML, which pages enforcing Trusted Types reject.
+  function explainIcon() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '11');
+    svg.setAttribute('height', '11');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.6');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const d of ['M2.5 3.5a1.5 1.5 0 0 1 1.5-1.5h8a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z', 'M5.5 5.5h5', 'M5.5 8h3']) {
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+    }
+    return svg;
   }
 
   // After a failed "simpler" request the ↓ turns red and carries the
@@ -1210,6 +1232,10 @@
     const body = document.createElement('div');
     body.className = 'ai-reader-memo__body';
     card.append(head, body);
+    // Hovering a card outlines the paragraph it explains — useful once a
+    // card has been pushed down by a neighbour's, or sits under the text.
+    card.addEventListener('mouseenter', () => block.classList.add('ai-reader-memo-target'));
+    card.addEventListener('mouseleave', () => block.classList.remove('ai-reader-memo-target'));
     document.documentElement.appendChild(card);
     const memo = { card, body };
     memos.set(block, memo);
@@ -1224,6 +1250,8 @@
     if (!memo) return;
     memos.delete(block);
     memo.card.remove();
+    // Closed while hovered (its × button) — mouseleave never fires then.
+    block.classList.remove('ai-reader-memo-target');
     memoResizeObserver.unobserve(block);
     if (!memos.size) memoResizeObserver.unobserve(document.body);
     if (levelBar.block === block) updateLevelBar();

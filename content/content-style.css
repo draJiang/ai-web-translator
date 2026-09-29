@@ -12,6 +12,15 @@
   border-radius: 2px;
 }
 
+/* The paragraph a hovered Explain memo card belongs to (see openMemo() in
+   content-script.js). Declared before .ai-reader-loading so an in-flight
+   request's pulsing outline still shows through. */
+.ai-reader-memo-target {
+  outline: 2px solid rgba(75, 119, 116, 0.75) !important;
+  outline-offset: 2px !important;
+  border-radius: 2px;
+}
+
 /* Marks the block currently being sent to the AI. Deliberately never
    touches color/opacity/background of the text itself — only an outline
    drawn outside the content box — so the original characters stay exactly
@@ -157,6 +166,10 @@
 }
 
 /* While the paragraph's memo card is open. */
+.ai-reader-levelbar__explain svg {
+  display: block;
+}
+
 .ai-reader-levelbar__explain[aria-pressed='true'] {
   background: rgba(255, 255, 255, 0.24);
 }
