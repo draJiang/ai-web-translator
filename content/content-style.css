@@ -84,6 +84,7 @@
 /* `all: unset` first so the host page's own button styles can't leak in. */
 .ai-reader-levelbar__label,
 .ai-reader-levelbar__down,
+.ai-reader-levelbar__explain,
 .ai-reader-levelbar__retry {
   all: unset;
   box-sizing: border-box;
@@ -111,10 +112,13 @@
   background: rgba(200, 60, 60, 0.9);
 }
 
-/* Retry replaces the level controls while the paragraph has failures. */
+/* Retry replaces the level controls while the paragraph has failures;
+   Explain is for paragraphs only, not an Alt+select explanation's bar. */
 .ai-reader-levelbar__retry,
 .ai-reader-levelbar--retry .ai-reader-levelbar__label,
-.ai-reader-levelbar--retry .ai-reader-levelbar__down {
+.ai-reader-levelbar--retry .ai-reader-levelbar__down,
+.ai-reader-levelbar--retry .ai-reader-levelbar__explain,
+.ai-reader-levelbar--gloss .ai-reader-levelbar__explain {
   display: none;
 }
 
@@ -122,7 +126,8 @@
   display: block;
 }
 
-.ai-reader-levelbar__label:hover:not(:disabled) {
+.ai-reader-levelbar__label:hover:not(:disabled),
+.ai-reader-levelbar__explain:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.18);
 }
 
@@ -137,6 +142,7 @@
 
 .ai-reader-levelbar__label:disabled,
 .ai-reader-levelbar__down:disabled,
+.ai-reader-levelbar__explain:disabled,
 .ai-reader-levelbar__retry:disabled {
   cursor: default;
   opacity: 0.45;
@@ -144,9 +150,15 @@
 
 .ai-reader-levelbar__label:focus-visible,
 .ai-reader-levelbar__down:focus-visible,
+.ai-reader-levelbar__explain:focus-visible,
 .ai-reader-levelbar__retry:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 1px;
+}
+
+/* While the paragraph's memo card is open. */
+.ai-reader-levelbar__explain[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 /* While that paragraph's "simpler" or retry request is in flight. */
@@ -201,4 +213,110 @@
   text-decoration: underline dotted;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+/* The Explain button's memo card (see openMemo() in content-script.js):
+   appended to <html> and absolutely positioned beside its paragraph, so it
+   scrolls with the page without taking part in its layout. Its colors and
+   font are all set explicitly — unlike a gloss it's not part of the text,
+   so it looks the same on every page, light or dark. */
+.ai-reader-memo {
+  all: initial;
+  position: absolute;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  display: block;
+  padding: 8px 12px 10px;
+  border-left: 3px solid rgba(75, 119, 116, 0.9);
+  border-radius: 6px;
+  background: #fff8dc;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 14px rgba(0, 0, 0, 0.1);
+  color: #2b2b2b;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+/* Under the paragraph it covers the text that follows, so it stands out more. */
+.ai-reader-memo--below {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.ai-reader-memo__head,
+.ai-reader-memo__title,
+.ai-reader-memo__body,
+.ai-reader-memo__close,
+.ai-reader-memo__retry {
+  all: unset;
+  box-sizing: border-box;
+}
+
+.ai-reader-memo__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ai-reader-memo__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4b7774;
+}
+
+.ai-reader-memo__close {
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.ai-reader-memo__close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.ai-reader-memo__body {
+  display: block;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.ai-reader-memo__body--loading {
+  animation: ai-reader-gloss-pulse 1s ease-in-out infinite;
+}
+
+.ai-reader-memo__body--failed {
+  color: #b33a3a;
+}
+
+.ai-reader-memo__retry {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(200, 60, 60, 0.9);
+  font-size: 12px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.ai-reader-memo__retry:hover {
+  background: rgba(200, 60, 60, 1);
+}
+
+.ai-reader-memo__close:focus-visible,
+.ai-reader-memo__retry:focus-visible {
+  outline: 2px solid #4b7774;
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-reader-memo__body--loading {
+    animation: none;
+    opacity: 0.6;
+  }
 }

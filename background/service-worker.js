@@ -1,5 +1,5 @@
 import { getSettings } from '../lib/storage.js';
-import { processBatch, explainSelection } from '../lib/providers.js';
+import { processBatch, explainSelection, explainParagraph } from '../lib/providers.js';
 import { LEVELS, normalizeLevel } from '../lib/prompts.js';
 
 // chrome.action.setIcon's `path` option must be resolved via chrome.runtime.getURL()
@@ -74,6 +74,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'EXPLAIN_TEXT') {
     getSettings()
       .then((settings) => explainSelection(settings, message.text, message.context, { level: message.level, previous: message.previous }))
+      .then((explanation) => sendResponse({ ok: true, explanation }))
+      .catch((err) => sendResponse(errorResponse(err)));
+    return true;
+  }
+  if (message?.type === 'EXPLAIN_PARAGRAPH') {
+    getSettings()
+      .then((settings) => explainParagraph(settings, message.text))
       .then((explanation) => sendResponse({ ok: true, explanation }))
       .catch((err) => sendResponse(errorResponse(err)));
     return true;

@@ -947,7 +947,7 @@
   // explanation, which has a level of its own (`gloss` set, `block` null) —
   // appended to <html> like the status toast so it never changes the page's
   // own layout or text.
-  const levelBar = { el: null, label: null, down: null, retry: null, block: null, gloss: null, hideTimer: null, lastTarget: null };
+  const levelBar = { el: null, label: null, down: null, explain: null, retry: null, block: null, gloss: null, hideTimer: null, lastTarget: null };
   // How long the bar stays up after the pointer leaves the paragraph, so it
   // can cross the gap into the bar.
   const LEVEL_BAR_HIDE_DELAY_MS = 300;
@@ -966,6 +966,10 @@
     levelBar.down.type = 'button';
     levelBar.down.className = 'ai-reader-levelbar__down';
     levelBar.down.textContent = '↓';
+    levelBar.explain = document.createElement('button');
+    levelBar.explain.type = 'button';
+    levelBar.explain.className = 'ai-reader-levelbar__explain';
+    levelBar.explain.textContent = 'Explain';
     levelBar.retry = document.createElement('button');
     levelBar.retry.type = 'button';
     levelBar.retry.className = 'ai-reader-levelbar__retry';
@@ -973,6 +977,7 @@
     for (const [btn, onBlock, onGloss] of [
       [levelBar.label, cycleBlockView, cycleExplanation],
       [levelBar.down, simplifyBlock, simplifyExplanation],
+      [levelBar.explain, toggleMemo, null],
       [levelBar.retry, retryBlock, null],
     ]) {
       btn.addEventListener('click', (event) => {
@@ -982,7 +987,7 @@
         else if (levelBar.block) onBlock(levelBar.block);
       });
     }
-    el.append(levelBar.label, levelBar.down, levelBar.retry);
+    el.append(levelBar.label, levelBar.down, levelBar.explain, levelBar.retry);
     el.addEventListener('mouseenter', () => clearTimeout(levelBar.hideTimer));
     el.addEventListener('mouseleave', () => scheduleHideLevelBar());
     document.documentElement.appendChild(el);
@@ -1005,6 +1010,7 @@
     const info = explanations.get(levelBar.gloss);
     const levels = loadedExplanationLevels(info);
     levelBar.el.classList.remove('ai-reader-levelbar--retry');
+    levelBar.el.classList.add('ai-reader-levelbar--gloss');
     levelBar.label.textContent = info.level;
     levelBar.label.disabled = info.busy || levels.length < 2;
     levelBar.label.title = `Reading level of this explanation — click to switch (${levels.join(' → ')})`;
@@ -1019,8 +1025,13 @@
     }
     const block = levelBar.block;
     if (!block || !levelBar.el) return;
+    levelBar.el.classList.remove('ai-reader-levelbar--gloss');
     const busy = state.blockBusy.has(block);
     levelBar.el.classList.toggle('ai-reader-levelbar--busy', busy);
+    const memoOpen = memos.has(block);
+    levelBar.explain.title = memoOpen ? 'Hide the explanation' : 'Explain this paragraph in simple English';
+    levelBar.explain.setAttribute('aria-label', levelBar.explain.title);
+    levelBar.explain.setAttribute('aria-pressed', String(memoOpen));
     // A paragraph with failed fragments doesn't really show its level, so
     // the bar offers Retry instead of the level controls until it's through.
     const failed = failedSegmentsIn(block);
@@ -1140,6 +1151,213 @@
 
   window.addEventListener('scroll', positionLevelBar, { capture: true, passive: true });
   window.addEventListener('resize', positionLevelBar, { passive: true });
+
+  // --- Paragraph "Explain" memo card --------------------------------------
+  //
+  // The level bar's Explain button asks the AI to explain the paragraph like
+  // a teacher would, and shows the answer on a memo card beside it — the
+  // paragraph's own text stays as it is. Like the level bar, the card is
+  // appended to <html> so it never takes part in the page's layout, but it's
+  // absolutely positioned in document coordinates rather than fixed, so it
+  // scrolls along with its paragraph.
+
+  // Paragraph element -> { card, body }, for the cards currently open.
+  const memos = new Map();
+  // Original paragraph text -> explanation. Survives closing a card and
+  // restore(), so reopening one doesn't ask the AI again.
+  const memoCache = new Map();
+  // Original paragraph text -> in-flight request, so closing and reopening a
+  // card while it's loading doesn't send a second one.
+  const memoRequests = new Map();
+  const MEMO_GAP_PX = 12;
+  const MEMO_MAX_WIDTH_PX = 320;
+  // Narrower than this beside the paragraph and the card goes under it instead.
+  const MEMO_MIN_SIDE_WIDTH_PX = 220;
+  const MEMO_BELOW_MAX_WIDTH_PX = 480;
+  // Keeps open cards next to their paragraphs when those move without the
+  // window resizing: the paragraph's own height changing (its level
+  // switched), or content above it loading in (body height changes).
+  const memoResizeObserver = new ResizeObserver(() => schedulePositionMemos());
+
+  function toggleMemo(block) {
+    if (memos.has(block)) removeMemo(block);
+    else openMemo(block);
+  }
+
+  function openMemo(block) {
+    const text = blockContext(block).trim();
+    if (!text) return;
+    const card = document.createElement('div');
+    card.className = 'ai-reader-memo ai-reader-ignore';
+    card.setAttribute('role', 'note');
+    const head = document.createElement('div');
+    head.className = 'ai-reader-memo__head';
+    const title = document.createElement('span');
+    title.className = 'ai-reader-memo__title';
+    title.textContent = 'Explanation';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ai-reader-memo__close';
+    close.textContent = '×';
+    close.title = 'Close';
+    close.setAttribute('aria-label', 'Close explanation');
+    close.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeMemo(block);
+    });
+    head.append(title, close);
+    const body = document.createElement('div');
+    body.className = 'ai-reader-memo__body';
+    card.append(head, body);
+    document.documentElement.appendChild(card);
+    const memo = { card, body };
+    memos.set(block, memo);
+    memoResizeObserver.observe(block);
+    if (memos.size === 1) memoResizeObserver.observe(document.body);
+    if (levelBar.block === block) updateLevelBar();
+    loadMemo(block, memo, text);
+  }
+
+  function removeMemo(block) {
+    const memo = memos.get(block);
+    if (!memo) return;
+    memos.delete(block);
+    memo.card.remove();
+    memoResizeObserver.unobserve(block);
+    if (!memos.size) memoResizeObserver.unobserve(document.body);
+    if (levelBar.block === block) updateLevelBar();
+  }
+
+  function removeAllMemos() {
+    for (const block of [...memos.keys()]) removeMemo(block);
+  }
+
+  function requestParagraphExplanation(text) {
+    if (!memoRequests.has(text)) {
+      const request = (async () => {
+        let res;
+        try {
+          res = await chrome.runtime.sendMessage({ type: 'EXPLAIN_PARAGRAPH', text });
+        } catch (err) {
+          throw messagingError(err);
+        }
+        if (!res?.ok) throw responseError(res, 'Explanation request failed');
+        const explanation = (res.explanation || '').trim();
+        if (!explanation) throw partialResultError();
+        memoCache.set(text, explanation);
+        return explanation;
+      })();
+      memoRequests.set(text, request);
+      request.finally(() => memoRequests.delete(text)).catch(() => {});
+    }
+    return memoRequests.get(text);
+  }
+
+  // On failure the card stays open with the reason and a Retry button, the
+  // same way a failed Alt+select explanation stays as "(failed · retry)".
+  async function loadMemo(block, memo, text) {
+    const { body } = memo;
+    body.classList.remove('ai-reader-memo__body--failed');
+    if (memoCache.has(text)) {
+      body.textContent = memoCache.get(text);
+      positionMemos();
+      return;
+    }
+    body.textContent = 'Explaining…';
+    body.classList.add('ai-reader-memo__body--loading');
+    positionMemos();
+    try {
+      const explanation = await requestParagraphExplanation(text);
+      if (memos.get(block) !== memo) return; // closed or restored away meanwhile
+      body.textContent = explanation;
+    } catch (err) {
+      if (memos.get(block) !== memo) return;
+      body.textContent = `Couldn't explain this paragraph · ${failureReason(err)} `;
+      body.classList.add('ai-reader-memo__body--failed');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'ai-reader-memo__retry';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        loadMemo(block, memo, text);
+      });
+      body.appendChild(retry);
+    } finally {
+      body.classList.remove('ai-reader-memo__body--loading');
+    }
+    positionMemos();
+  }
+
+  // Beside the paragraph on the right when there's room, else on the left,
+  // else just under it — overlapping the text that follows, never pushing it
+  // down. Cards on the same side are stacked so neighbouring paragraphs'
+  // cards don't cover each other.
+  function positionMemos() {
+    if (!memos.size) return;
+    const viewportWidth = document.documentElement.clientWidth;
+    const placed = [];
+    for (const [block, memo] of [...memos]) {
+      if (!block.isConnected) {
+        removeMemo(block);
+        continue;
+      }
+      const rect = block.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        memo.card.style.display = 'none';
+        continue;
+      }
+      memo.card.style.display = '';
+      placed.push({ memo, rect });
+    }
+    placed.sort((a, b) => a.rect.top - b.rect.top);
+    const columnBottom = { right: -Infinity, left: -Infinity };
+    for (const { memo, rect } of placed) {
+      const rightSpace = viewportWidth - rect.right - MEMO_GAP_PX * 2;
+      const leftSpace = rect.left - MEMO_GAP_PX * 2;
+      let side;
+      let width;
+      let left;
+      if (rightSpace >= MEMO_MIN_SIDE_WIDTH_PX) {
+        side = 'right';
+        width = Math.min(MEMO_MAX_WIDTH_PX, rightSpace);
+        left = rect.right + MEMO_GAP_PX;
+      } else if (leftSpace >= MEMO_MIN_SIDE_WIDTH_PX) {
+        side = 'left';
+        width = Math.min(MEMO_MAX_WIDTH_PX, leftSpace);
+        left = rect.left - MEMO_GAP_PX - width;
+      } else {
+        side = 'below';
+        width = Math.min(MEMO_BELOW_MAX_WIDTH_PX, rect.width, viewportWidth - MEMO_GAP_PX * 2);
+        left = Math.max(MEMO_GAP_PX, rect.left);
+      }
+      memo.card.classList.toggle('ai-reader-memo--below', side === 'below');
+      memo.card.style.width = `${width}px`;
+      let top = window.scrollY + (side === 'below' ? rect.bottom + MEMO_GAP_PX / 2 : rect.top);
+      if (side !== 'below') {
+        top = Math.max(top, columnBottom[side] + MEMO_GAP_PX / 2);
+        columnBottom[side] = top + memo.card.offsetHeight;
+      }
+      memo.card.style.left = `${window.scrollX + left}px`;
+      memo.card.style.top = `${top}px`;
+    }
+  }
+
+  let memoFrame = 0;
+  function schedulePositionMemos() {
+    if (memoFrame || !memos.size) return;
+    memoFrame = requestAnimationFrame(() => {
+      memoFrame = 0;
+      positionMemos();
+    });
+  }
+
+  // Scrolling the window moves the cards with the page on its own; this is
+  // for paragraphs inside a scrolling container of the page's own.
+  window.addEventListener('scroll', schedulePositionMemos, { capture: true, passive: true });
+  window.addEventListener('resize', schedulePositionMemos, { passive: true });
 
   // --- Alt+select "explain this" ------------------------------------------
   //
@@ -1382,6 +1600,7 @@
     stopNavWatcher();
     state.trackedNodes = new WeakSet();
     hideLevelBar();
+    removeAllMemos();
     for (const node of state.originalMap.keys()) renderUnit(node, null);
     state.originalMap.clear();
     state.rewriteWrappers.clear();
