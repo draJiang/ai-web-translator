@@ -136,13 +136,19 @@ button {
 }
 
 .hint {
+  margin-top: 24px;
   background: #fff;
   border: 1px solid #eee;
   border-radius: 8px;
-  padding: 4px 18px 14px;
+  padding: 16px 18px;
+}
+
+.hint h2 {
+  margin-top: 0;
 }
 
 .hint ul {
+  margin: 0;
   padding-left: 18px;
   font-size: 13px;
   line-height: 1.6;
